@@ -16,7 +16,6 @@ env/
 
 # Test / sample documents — never commit real cXML files
 *.xml
-*.txt
 
 # macOS
 .DS_Store
