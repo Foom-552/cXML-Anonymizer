@@ -566,7 +566,7 @@ if "clear_trigger" not in st.session_state:
 
 st.title("🔒 cXML Anonymizer Tool")
 st.markdown(
-    "Securely anonymize cXML transactional documents for Test Central setup "
+    "Securely anonymize cXML transactional documents for Test Central setup. "
     "Accepts **.xml** and **.txt** files."
 )
 st.divider()
