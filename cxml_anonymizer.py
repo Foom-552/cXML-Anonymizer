@@ -551,6 +551,38 @@ def create_zip_file(files_dict: dict[str, str]) -> io.BytesIO:
 
 
 # ---------------------------------------------------------------------------
+# HELPER: render XML in a scrollable, height-constrained container
+# ---------------------------------------------------------------------------
+
+def _render_scrollable_xml(xml_text: str, height_px: int = 400) -> None:
+    """Display XML content inside a scrollable <div> with a fixed max height.
+
+    Uses an HTML <pre><code> block styled to constrain height and scroll
+    independently, so large documents never blow up the page layout.
+    """
+    import html as _html
+
+    escaped = _html.escape(xml_text)
+    st.markdown(
+        f"""
+        <div style="
+            max-height: {height_px}px;
+            overflow: auto;
+            border: 1px solid #444;
+            border-radius: 6px;
+            background-color: #0e1117;
+            padding: 0.75rem;
+            font-size: 0.82rem;
+            line-height: 1.4;
+        ">
+            <pre style="margin:0; white-space:pre; color:#fafafa;"><code>{escaped}</code></pre>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # STREAMLIT UI
 # ---------------------------------------------------------------------------
 
@@ -558,6 +590,20 @@ st.set_page_config(
     page_title="cXML Anonymizer Tool",
     page_icon="🔒",
     layout="wide",
+)
+
+# ---- Inject global CSS to constrain validation expander and preview heights ----
+st.markdown(
+    """
+    <style>
+    /* Make validation-error expander content scrollable */
+    div[data-testid="stExpander"] details div[data-testid="stMarkdownContainer"] {
+        max-height: 300px;
+        overflow-y: auto;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 # Session state for the clear-all button
@@ -693,7 +739,7 @@ for i, uploaded_file in enumerate(uploaded_files):
 
         with col4:
             with st.expander("👁️ Preview"):
-                st.code(file_content, language="xml")
+                _render_scrollable_xml(file_content, height_px=300)
 
         if is_valid:
             file_configs.append(
@@ -705,11 +751,30 @@ for i, uploaded_file in enumerate(uploaded_files):
 
         st.divider()
 
-# Validation errors grouped in one expander
+# Validation errors grouped in one compact, scrollable expander
 if validation_errors:
     with st.expander("⚠️ Validation Errors — click to expand", expanded=True):
-        for error in validation_errors:
-            st.warning(error)
+        # Wrap errors in a height-constrained scrollable div
+        error_html = "".join(
+            f"<p style='color:#faad14; margin:0.3rem 0;'>⚠️ {err}</p>"
+            for err in validation_errors
+        )
+        st.markdown(
+            f"""
+            <div style="
+                max-height: 200px;
+                overflow-y: auto;
+                border: 1px solid #444;
+                border-radius: 6px;
+                padding: 0.75rem;
+                background-color: #1a1a2e;
+                font-size: 0.9rem;
+            ">
+                {error_html}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 # File summary bar
 valid_count = len(file_configs)
@@ -813,7 +878,7 @@ if not dry_run and anonymized_files:
         col1, col2 = st.columns([3, 1])
         with col1:
             with st.expander(f"👁️ Preview: {filename}"):
-                st.code(content, language="xml")
+                _render_scrollable_xml(content, height_px=400)
         with col2:
             st.download_button(
                 label="📥 Download",
