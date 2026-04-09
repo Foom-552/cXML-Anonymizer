@@ -740,24 +740,38 @@ for i, uploaded_file in enumerate(uploaded_files):
 
         with col3:
             if is_valid:
-                st.success(f"✅ {doc_type}")
+                st.markdown(
+                    f"<div style='"
+                    f"background-color: #0e4429;"
+                    f"border: 1px solid #238636;"
+                    f"border-radius: 6px;"
+                    f"padding: 0.35rem 0.6rem;"
+                    f"text-align: center;"
+                    f"font-size: 0.85rem;"
+                    f"color: #3fb950;"
+                    f"line-height: 1.3;"
+                    f"margin-top: 0.25rem;"
+                    f"'>✅ {doc_type}</div>",
+                    unsafe_allow_html=True,
+                )
             else:
-                st.error("❌ Invalid")
+                st.markdown(
+                    f"<div style='"
+                    f"background-color: #4a1a1a;"
+                    f"border: 1px solid #d73a49;"
+                    f"border-radius: 6px;"
+                    f"padding: 0.35rem 0.6rem;"
+                    f"text-align: center;"
+                    f"font-size: 0.85rem;"
+                    f"color: #f85149;"
+                    f"line-height: 1.3;"
+                    f"margin-top: 0.25rem;"
+                    f"'>❌ Invalid</div>",
+                    unsafe_allow_html=True,
+                )
                 validation_errors.append(
                     f"**{uploaded_file.name}:** {validation_message}"
                 )
-
-        # ---- Row 2: full-width preview expander ----
-        with st.expander(f"👁️ Preview source — {uploaded_file.name}"):
-            _render_scrollable_xml(file_content, height_px=300)
-
-        if is_valid:
-            file_configs.append(
-                {
-                    "file": uploaded_file,
-                    "doc_type": doc_type,
-                }
-            )
 
         st.divider()
 
