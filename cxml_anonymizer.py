@@ -722,10 +722,12 @@ for i, uploaded_file in enumerate(uploaded_files):
 
         with col1:
             file_size = len(uploaded_file.getvalue()) / 1024
-            st.markdown(f"**📄 {uploaded_file.name}**  \n"
-                        f"<span style='color:gray; font-size:0.85rem;'>"
-                        f"Size: {file_size:.1f} KB</span>",
-                        unsafe_allow_html=True)
+            st.markdown(
+                f"**📄 {uploaded_file.name}**  \n"
+                f"<span style='color:gray; font-size:0.85rem;'>"
+                f"Size: {file_size:.1f} KB</span>",
+                unsafe_allow_html=True,
+            )
 
         with col2:
             if is_valid:
@@ -772,6 +774,19 @@ for i, uploaded_file in enumerate(uploaded_files):
                 validation_errors.append(
                     f"**{uploaded_file.name}:** {validation_message}"
                 )
+
+        # ---- Row 2: full-width preview expander ----
+        with st.expander(f"👁️ Preview source — {uploaded_file.name}"):
+            _render_scrollable_xml(file_content, height_px=300)
+
+        # ---- Collect valid files for processing ----
+        if is_valid:
+            file_configs.append(
+                {
+                    "file": uploaded_file,
+                    "doc_type": doc_type,
+                }
+            )
 
         st.divider()
 
