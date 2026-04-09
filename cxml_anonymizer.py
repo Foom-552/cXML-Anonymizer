@@ -706,6 +706,7 @@ for i, uploaded_file in enumerate(uploaded_files):
 
     # Pre-detect region for display (only for valid files)
     detected_region_label = ""
+    detected_by = ""
     if is_valid:
         try:
             root_preview = lxml_ET.fromstring(file_content.encode())
@@ -713,20 +714,27 @@ for i, uploaded_file in enumerate(uploaded_files):
             detected_region_label = REGIONAL_PROFILES[detected_code]["display_name"]
         except Exception:
             detected_region_label = REGIONAL_PROFILES[DEFAULT_REGION]["display_name"]
+            detected_by = "fallback default"
 
     with st.container():
-        # 4-column layout: filename | auto-detected region | doc type badge | preview
-        col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+        # ---- Row 1: file name | region | doc type / status ----
+        col1, col2, col3 = st.columns([2, 2, 1])
 
         with col1:
-            st.markdown(f"**📄 {uploaded_file.name}**")
             file_size = len(uploaded_file.getvalue()) / 1024
-            st.caption(f"Size: {file_size:.1f} KB")
+            st.markdown(f"**📄 {uploaded_file.name}**  \n"
+                        f"<span style='color:gray; font-size:0.85rem;'>"
+                        f"Size: {file_size:.1f} KB</span>",
+                        unsafe_allow_html=True)
 
         with col2:
             if is_valid:
-                st.info(f"🌍 {detected_region_label}")
-                st.caption(f"Detected via: {detected_by}")
+                st.markdown(
+                    f"🌍 **{detected_region_label}**  \n"
+                    f"<span style='color:gray; font-size:0.85rem;'>"
+                    f"Detected via: {detected_by}</span>",
+                    unsafe_allow_html=True,
+                )
             else:
                 st.empty()
 
@@ -735,11 +743,13 @@ for i, uploaded_file in enumerate(uploaded_files):
                 st.success(f"✅ {doc_type}")
             else:
                 st.error("❌ Invalid")
-                validation_errors.append(f"**{uploaded_file.name}:** {validation_message}")
+                validation_errors.append(
+                    f"**{uploaded_file.name}:** {validation_message}"
+                )
 
-        with col4:
-            with st.expander("👁️ Preview"):
-                _render_scrollable_xml(file_content, height_px=300)
+        # ---- Row 2: full-width preview expander ----
+        with st.expander(f"👁️ Preview source — {uploaded_file.name}"):
+            _render_scrollable_xml(file_content, height_px=300)
 
         if is_valid:
             file_configs.append(
