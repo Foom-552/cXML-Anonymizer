@@ -1,4 +1,5 @@
 import io
+import html as _html
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -136,18 +137,18 @@ SENSITIVE_ATTR_NAMES: set[str] = {"name", "email", "phone", "contact", "firstNam
 # These are system/classification codes where the real value is required for
 # Test Central setup and carries no personally identifiable information.
 PRESERVE_EXTRINSIC_NAMES: set[str] = {
-    "extLineNumber",               # Line sequence number — structural, not sensitive
-    "materialStorageLocation",     # Storage location code
-    "warehouseStorageLocationNo",  # Warehouse location number
-    "incoTerm",                    # Incoterm code (e.g. CFR, EXW)
-    "incoTermDesc",                # Incoterm description
-    "incoTermLocation",            # Incoterm location
-    "CompanyCode",                 # SAP company code
-    "PurchaseGroup",               # SAP purchasing group
-    "PurchaseOrganization",        # SAP purchasing organisation
-    "Ariba.invoicingAllowed",      # Boolean flag (Yes/No)
-    "AribaNetwork.PaymentTermsExplanation",  # Standard payment terms text
-    "transactionCategoryOrType",   # Document category (e.g. Goods PO)
+    "extLineNumber",
+    "materialStorageLocation",
+    "warehouseStorageLocationNo",
+    "incoTerm",
+    "incoTermDesc",
+    "incoTermLocation",
+    "CompanyCode",
+    "PurchaseGroup",
+    "PurchaseOrganization",
+    "Ariba.invoicingAllowed",
+    "AribaNetwork.PaymentTermsExplanation",
+    "transactionCategoryOrType",
 }
 
 # Maps the Extrinsic name="" attribute to a meaningful anonymized placeholder.
@@ -184,7 +185,7 @@ EXTRINSIC_ANONYMIZATION_MAP: dict[str, str] = {
     # Contact / user details
     "userIdentification": "Anonymized User",
     "mailbox": "anonymized.user@anonymized.com",
-    "supplementNo": "ANONYMIZED-PHONE",             # Phone number stored in supplementNo
+    "supplementNo": "ANONYMIZED-PHONE",
     "Requester": "Anonymized Requester",
     "contactName": "Anonymized Contact",
     "buyerContact": "Anonymized Buyer Contact",
@@ -373,39 +374,106 @@ def validate_cxml_file(xml_content: str) -> tuple[bool, str, str | None]:
 
 
 # ---------------------------------------------------------------------------
-# ANONYMIZATION  (unchanged from Script 2)
+# ANONYMIZATION
 # ---------------------------------------------------------------------------
 
-def apply_header_template(root: lxml_ET._Element) -> None:
+def apply_header_template(root: lxml_ET._Element) -> list[dict]:
     """Overwrite cXML envelope attributes and the Header / OrderRequestHeader
-    with sanitised placeholder values."""
-    root.set("payloadID", "#PAYLOADID#")
-    root.set("timestamp", "2026-01-01T14:53:00-07:00")
-    root.set("version", "1.2.069")
+    with sanitised placeholder values.
+
+    Returns a list of dicts with keys: field, original, anonymized.
+    """
+    log: list[dict] = []
+
+    for attr, new_val in [
+        ("payloadID", "#PAYLOADID#"),
+        ("timestamp", "2026-01-01T14:53:00-07:00"),
+        ("version", "1.2.069"),
+    ]:
+        old_val = root.get(attr, "")
+        root.set(attr, new_val)
+        if old_val != new_val:
+            log.append({"field": f"<cXML {attr}>", "original": old_val, "anonymized": new_val})
+
+    old_lang = root.get("{http://www.w3.org/XML/1998/namespace}lang", "")
     root.set("{http://www.w3.org/XML/1998/namespace}lang", "en-US")
+    if old_lang != "en-US":
+        log.append({"field": "<cXML xml:lang>", "original": old_lang, "anonymized": "en-US"})
 
     header = root.find("Header")
     if header is not None:
-        _replace_credential(header.find("From"), "#SENDERID#", "NetworkId")
-        _replace_credential(header.find("To"), "#RECEIVERID#", "NetworkId")
-        _replace_credential(header.find("Sender"), "#PROVIDERID#", "NetworkID")
+        for parent_tag, identity, domain in [
+            ("From", "#SENDERID#", "NetworkId"),
+            ("To", "#RECEIVERID#", "NetworkId"),
+            ("Sender", "#PROVIDERID#", "NetworkID"),
+        ]:
+            parent_el = header.find(parent_tag)
+            if parent_el is not None:
+                # Capture original identity before replacement
+                old_identity = ""
+                old_domain = ""
+                for cred in parent_el.findall("Credential"):
+                    old_domain = cred.get("domain", "")
+                    id_el = cred.find("Identity")
+                    if id_el is not None and id_el.text:
+                        old_identity = id_el.text
+                        break
+                _replace_credential(parent_el, identity, domain)
+                log.append({
+                    "field": f"<{parent_tag}/Credential/Identity>",
+                    "original": old_identity,
+                    "anonymized": identity,
+                })
+                if old_domain and old_domain != domain:
+                    log.append({
+                        "field": f"<{parent_tag}/Credential domain>",
+                        "original": old_domain,
+                        "anonymized": domain,
+                    })
 
         sender_tag = header.find("Sender")
         if sender_tag is not None:
             user_agent = sender_tag.find("UserAgent")
             if user_agent is not None:
+                old_ua = user_agent.text or ""
                 user_agent.text = "Ariba SN"
+                if old_ua != "Ariba SN":
+                    log.append({
+                        "field": "<Sender/UserAgent>",
+                        "original": old_ua,
+                        "anonymized": "Ariba SN",
+                    })
 
     request_tag = root.find("Request")
     if request_tag is not None:
+        old_deploy = request_tag.get("deploymentMode", "")
         request_tag.set("deploymentMode", "test")
+        if old_deploy != "test":
+            log.append({
+                "field": "<Request deploymentMode>",
+                "original": old_deploy,
+                "anonymized": "test",
+            })
+
         orh = request_tag.find(".//OrderRequestHeader")
         if orh is not None:
-            orh.set("orderDate", "#DATETIME#")
-            orh.set("orderID", "#DOCUMENTID#")
-            orh.set("orderType", "regular")
-            orh.set("orderVersion", "1")
-            orh.set("type", "new")
+            for attr, new_val in [
+                ("orderDate", "#DATETIME#"),
+                ("orderID", "#DOCUMENTID#"),
+                ("orderType", "regular"),
+                ("orderVersion", "1"),
+                ("type", "new"),
+            ]:
+                old_val = orh.get(attr, "")
+                orh.set(attr, new_val)
+                if old_val != new_val:
+                    log.append({
+                        "field": f"<OrderRequestHeader {attr}>",
+                        "original": old_val,
+                        "anonymized": new_val,
+                    })
+
+    return log
 
 
 def _replace_credential(
@@ -423,56 +491,82 @@ def _replace_credential(
     lxml_ET.SubElement(cred, "Identity").text = identity
 
 
-def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> list[str]:
+def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> list[dict]:
     """Recursively traverse *element* and apply anonymization rules from *profile*.
 
-    Returns a list of human-readable strings describing every substitution made,
-    suitable for display in the processing summary.
+    Returns a list of dicts with keys:
+        field, original, anonymized
+    suitable for display in a summary table.
     """
-    log: list[str] = []
+    log: list[dict] = []
 
     for child in element:
         local_tag = lxml_ET.QName(child.tag).localname  # strip namespace if present
 
         # --- Element text substitution ---
         if local_tag in profile:
-            old = child.text
+            old = child.text or ""
             child.text = profile[local_tag]
             if old != child.text:
-                log.append(f"<{local_tag}> text → `{profile[local_tag]}`")
+                log.append({
+                    "field": f"<{local_tag}> text",
+                    "original": old,
+                    "anonymized": profile[local_tag],
+                })
 
         # Special-case: Money currency attribute
         if local_tag == "Money" and "currency" in profile:
+            old_curr = child.get("currency", "")
             child.set("currency", profile["currency"])
-            log.append(f"<Money currency> → `{profile['currency']}`")
+            log.append({
+                "field": "<Money currency>",
+                "original": old_curr,
+                "anonymized": profile["currency"],
+            })
 
         # Special-case: Country isoCountryCode attribute
         if local_tag == "Country" and "isoCountryCode" in profile:
+            old_code = child.get("isoCountryCode", "")
             child.set("isoCountryCode", profile["isoCountryCode"])
-            log.append(f"<Country isoCountryCode> → `{profile['isoCountryCode']}`")
+            log.append({
+                "field": "<Country isoCountryCode>",
+                "original": old_code,
+                "anonymized": profile["isoCountryCode"],
+            })
 
-        # Extrinsic: check preserve list first, then look up a meaningful anonymized
-        # value by name, falling back to the generic placeholder for unknowns.
+        # Extrinsic handling
         if local_tag == "Extrinsic":
             extrinsic_name = child.get("name", "")
             if extrinsic_name in PRESERVE_EXTRINSIC_NAMES:
-                # Value must not be changed — skip entirely and log the decision
-                log.append(f"<Extrinsic name=\"{extrinsic_name}\"> → (preserved)")
+                log.append({
+                    "field": f'<Extrinsic name="{extrinsic_name}">',
+                    "original": child.text or "",
+                    "anonymized": "(preserved — unchanged)",
+                })
             else:
                 if extrinsic_name in EXTRINSIC_ANONYMIZATION_MAP:
                     anonymized_value = EXTRINSIC_ANONYMIZATION_MAP[extrinsic_name]
                 else:
                     anonymized_value = "ANONYMIZED_EXTRINSIC_VALUE"
-                old_text = child.text
+                old_text = child.text or ""
                 child.text = anonymized_value
                 if old_text != anonymized_value:
                     label = f'name="{extrinsic_name}"' if extrinsic_name else "(no name)"
-                    log.append(f"<Extrinsic {label}> → `{anonymized_value}`")
+                    log.append({
+                        "field": f"<Extrinsic {label}>",
+                        "original": old_text,
+                        "anonymized": anonymized_value,
+                    })
 
         # IdReference identifiers are always scrubbed
         if local_tag == "IdReference" and "identifier" in child.attrib:
+            old_id = child.get("identifier", "")
             child.set("identifier", "ANONYMIZED_IDENTIFIER")
-            log.append("<IdReference identifier> → `ANONYMIZED_IDENTIFIER`")
+            log.append({
+                "field": "<IdReference identifier>",
+                "original": old_id,
+                "anonymized": "ANONYMIZED_IDENTIFIER",
+            })
 
         # --- Attribute substitution ---
         for attr_name in list(child.attrib):
@@ -482,11 +576,21 @@ def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> li
             if local_tag == "Extrinsic" and local_attr == "name":
                 continue
             if local_attr in profile:
+                old_val = child.get(attr_name, "")
                 child.set(attr_name, profile[local_attr])
-                log.append(f"<{local_tag} {local_attr}> → `{profile[local_attr]}`")
+                log.append({
+                    "field": f"<{local_tag} {local_attr}>",
+                    "original": old_val,
+                    "anonymized": profile[local_attr],
+                })
             elif local_attr.lower() in SENSITIVE_ATTR_NAMES:
+                old_val = child.get(attr_name, "")
                 child.set(attr_name, "ANONYMIZED")
-                log.append(f"<{local_tag} {local_attr}> (sensitive attr) → `ANONYMIZED`")
+                log.append({
+                    "field": f"<{local_tag} {local_attr}> (sensitive)",
+                    "original": old_val,
+                    "anonymized": "ANONYMIZED",
+                })
 
         log.extend(anonymize_elements(child, profile))
 
@@ -505,7 +609,7 @@ def _insert_doctype(xml_string: str) -> str:
 
 def process_cxml_content(
     xml_content: str,
-) -> tuple[str, list[str], str, str]:
+) -> tuple[str, list[dict], str, str]:
     """Parse, anonymize and serialise a cXML document.
 
     Region is detected automatically from signals within the document.
@@ -513,6 +617,7 @@ def process_cxml_content(
 
     Returns:
         (anonymized_xml_string, substitution_log, region_code, detection_method)
+        substitution_log is a list of dicts with keys: field, original, anonymized
     """
     # Security gate (defusedxml) — result discarded; lxml handles processing
     safe_ET.fromstring(xml_content.encode())
@@ -526,8 +631,9 @@ def process_cxml_content(
     active_profile: dict[str, str] = {**GENERIC_ANONYMIZATION_MAP, **REGIONAL_PROFILES[region_code]}
     active_profile.pop("display_name", None)
 
-    apply_header_template(root)
-    log = anonymize_elements(root, active_profile)
+    header_log = apply_header_template(root)
+    element_log = anonymize_elements(root, active_profile)
+    log = header_log + element_log
 
     output_bytes: bytes = lxml_ET.tostring(
         root,
@@ -560,8 +666,6 @@ def _render_scrollable_xml(xml_text: str, height_px: int = 400) -> None:
     Uses an HTML <pre><code> block styled to constrain height and scroll
     independently, so large documents never blow up the page layout.
     """
-    import html as _html
-
     escaped = _html.escape(xml_text)
     st.markdown(
         f"""
@@ -580,6 +684,91 @@ def _render_scrollable_xml(xml_text: str, height_px: int = 400) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# HELPER: render the processing summary as a scrollable, copyable table
+# ---------------------------------------------------------------------------
+
+def _render_summary_table(log: list[dict], filename: str, height_px: int = 400) -> None:
+    """Render the substitution log as a scrollable HTML table with a TSV download button.
+
+    Each entry in *log* is a dict with keys: field, original, anonymized.
+    Duplicates (by all three fields) are removed while preserving order.
+    """
+    # Deduplicate while preserving order
+    seen: set[tuple] = set()
+    unique_log: list[dict] = []
+    for entry in log:
+        key = (entry["field"], entry["original"], entry["anonymized"])
+        if key not in seen:
+            seen.add(key)
+            unique_log.append(entry)
+
+    if not unique_log:
+        st.info("No substitutions were recorded for this file.")
+        return
+
+    # Build HTML table rows
+    rows_html = ""
+    for idx, entry in enumerate(unique_log, 1):
+        field = _html.escape(entry["field"])
+        original = _html.escape(entry["original"]) if entry["original"] else "<em>(empty)</em>"
+        anonymized = _html.escape(entry["anonymized"])
+        rows_html += (
+            f"<tr>"
+            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#aaa; text-align:center;'>{idx}</td>"
+            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#79c0ff; font-family:monospace; font-size:0.82rem;'>{field}</td>"
+            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#f85149; font-family:monospace; font-size:0.82rem;'>{original}</td>"
+            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#3fb950; font-family:monospace; font-size:0.82rem;'>{anonymized}</td>"
+            f"</tr>"
+        )
+
+    table_html = f"""
+    <div style="
+        max-height: {height_px}px;
+        overflow: auto;
+        border: 1px solid #444;
+        border-radius: 6px;
+        background-color: #0d1117;
+    ">
+        <table style="
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        ">
+            <thead>
+                <tr style="background-color: #161b22; position: sticky; top: 0; z-index: 1;">
+                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9; text-align:center; width:50px;">#</th>
+                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9; text-align:left;">Field</th>
+                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9; text-align:left;">Original Value</th>
+                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9; text-align:left;">Anonymized Value</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows_html}
+            </tbody>
+        </table>
+    </div>
+    """
+    st.markdown(table_html, unsafe_allow_html=True)
+
+    # Build a plain-text TSV version for the copy/download button
+    tsv_lines = ["#\tField\tOriginal Value\tAnonymized Value"]
+    for idx, entry in enumerate(unique_log, 1):
+        tsv_lines.append(
+            f"{idx}\t{entry['field']}\t{entry['original']}\t{entry['anonymized']}"
+        )
+    tsv_text = "\n".join(tsv_lines)
+
+    st.download_button(
+        label="📋 Download as TSV (paste into Excel / Sheets)",
+        data=tsv_text,
+        file_name=f"substitution_summary_{filename}.tsv",
+        mime="text/tab-separated-values",
+        key=f"tsv_{filename}_{len(unique_log)}",
+    )
+    st.caption(f"{len(unique_log)} unique substitution(s)")
 
 
 # ---------------------------------------------------------------------------
@@ -930,7 +1119,7 @@ if not dry_run and anonymized_files:
 # --- Processing summary ---
 st.divider()
 st.subheader("📋 Processing Summary")
-st.caption("Auto-detected region, timestamp, and every field substitution made across all files.")
+st.caption("Auto-detected region, timestamp, and every field substitution with original and anonymized values.")
 
 for filename, info in processing_logs.items():
     log = info["log"]
@@ -939,14 +1128,18 @@ for filename, info in processing_logs.items():
     processed_at = info["processed_at"]
     is_dry_run = info["dry_run"]
     dry_run_badge = " 🔍 Dry-run" if is_dry_run else ""
-    unique_log = list(dict.fromkeys(log))  # Preserves order, removes duplicates
-    with st.expander(f"🔍 {filename} — {region} — {len(unique_log)} substitution(s){dry_run_badge}"):
+
+    # Count unique entries for the expander label
+    seen_keys: set[tuple] = set()
+    for entry in log:
+        seen_keys.add((entry["field"], entry["original"], entry["anonymized"]))
+    unique_count = len(seen_keys)
+
+    with st.expander(
+        f"🔍 {filename} — {region} — {unique_count} substitution(s){dry_run_badge}"
+    ):
         st.caption(f"Processed at: {processed_at} | Region detected via: {detection_method}")
-        if unique_log:
-            for entry in unique_log:
-                st.markdown(f"- {entry}")
-        else:
-            st.info("No substitutions were recorded for this file.")
+        _render_summary_table(log, filename, height_px=400)
 
 # --- Footer ---
 st.divider()
