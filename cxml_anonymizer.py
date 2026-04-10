@@ -1,5 +1,7 @@
+import hashlib
 import io
 import html as _html
+import re
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -20,12 +22,26 @@ except ImportError:
     st.error("Missing dependency: `lxml`. Run `pip install lxml` and restart.")
     st.stop()
 
+
+# ---------------------------------------------------------------------------
+# HARDENED lxml PARSER  (FIX #1 — SSRF / external entity via lxml)
+# ---------------------------------------------------------------------------
+# defusedxml is used as a security gate, but lxml re-parses independently and,
+# by default, will resolve external entities and DTD network references.
+# This single parser instance is used everywhere lxml touches user content.
+_SAFE_PARSER = lxml_ET.XMLParser(
+    resolve_entities=False,   # never expand entity references
+    no_network=True,          # block all network I/O during parse
+    load_dtd=False,           # do not load or process any DTD
+    huge_tree=False,          # reject deeply-nested / billion-node documents
+)
+
+
 # ---------------------------------------------------------------------------
 # CONFIGURATION
 # ---------------------------------------------------------------------------
 
 # Generic / universal anonymization rules.
-# Keys match either XML element tag names or attribute names.
 GENERIC_ANONYMIZATION_MAP: dict[str, str] = {
     "Name": "Anonymized Name",
     "Email": "test.user@anonymized.com",
@@ -41,9 +57,6 @@ GENERIC_ANONYMIZATION_MAP: dict[str, str] = {
 }
 
 # Regional profiles supply locale-specific anonymized replacement values.
-# Region is detected automatically from the document — never set by the user.
-# Keys here take precedence over GENERIC_ANONYMIZATION_MAP when both define the
-# same key (e.g. "currency"). This precedence is intentional and documented here.
 REGIONAL_PROFILES: dict[str, dict[str, str]] = {
     "AU": {
         "display_name": "Australia (AU)",
@@ -127,15 +140,24 @@ CURRENCY_TO_REGION: dict[str, str] = {
     "SAR": "EMEA", "TRY": "EMEA", "ILS": "EMEA", "QAR": "EMEA",
 }
 
+# FIX #11 — moved out of detect_region() so it is not rebuilt on every call.
+COUNTRY_NAME_TO_REGION: dict[str, str] = {
+    "australia": "AU", "new zealand": "AU",
+    "united states": "NAMAR", "usa": "NAMAR", "canada": "NAMAR", "mexico": "NAMAR",
+    "japan": "Japan",
+    "germany": "EMEA", "france": "EMEA", "united kingdom": "EMEA",
+    "uk": "EMEA", "england": "EMEA", "netherlands": "EMEA",
+    "spain": "EMEA", "italy": "EMEA", "sweden": "EMEA", "norway": "EMEA",
+    "denmark": "EMEA", "finland": "EMEA", "switzerland": "EMEA",
+    "austria": "EMEA", "belgium": "EMEA", "ireland": "EMEA",
+    "south africa": "EMEA", "united arab emirates": "EMEA", "uae": "EMEA",
+    "saudi arabia": "EMEA",
+}
+
 DEFAULT_REGION = "AU"
 
-# Attribute names that are always considered sensitive and scrubbed regardless
-# of whether they appear in the anonymization map.
 SENSITIVE_ATTR_NAMES: set[str] = {"name", "email", "phone", "contact", "firstName", "lastName"}
 
-# Extrinsic name="" values whose text content should be left completely unchanged.
-# These are system/classification codes where the real value is required for
-# Test Central setup and carries no personally identifiable information.
 PRESERVE_EXTRINSIC_NAMES: set[str] = {
     "extLineNumber",
     "materialStorageLocation",
@@ -151,10 +173,6 @@ PRESERVE_EXTRINSIC_NAMES: set[str] = {
     "transactionCategoryOrType",
 }
 
-# Maps the Extrinsic name="" attribute to a meaningful anonymized placeholder.
-# The name attribute itself is always preserved as-is.
-# Fields listed in PRESERVE_EXTRINSIC_NAMES are skipped entirely before this map is checked.
-# Any Extrinsic whose name is not in either set falls back to "ANONYMIZED_EXTRINSIC_VALUE".
 EXTRINSIC_ANONYMIZATION_MAP: dict[str, str] = {
     # Tax & registration identifiers
     "supplierVatID": "Supplier ABN",
@@ -165,7 +183,6 @@ EXTRINSIC_ANONYMIZATION_MAP: dict[str, str] = {
     "abn": "000000000",
     "gst": "GST-000000000",
     "businessIdentNo": "BUSINESS-ID-00000000000",
-
     # Supplier / buyer identifiers
     "supplierID": "SUPPLIER-ID-00000",
     "buyerID": "BUYER-ID-00000",
@@ -181,7 +198,6 @@ EXTRINSIC_ANONYMIZATION_MAP: dict[str, str] = {
     "erp_vendor_id": "ERP-VENDOR-00000",
     "manufacturerNo": "MANUFACTURER-00000",
     "receiverID": "RECEIVER-ID-00000",
-
     # Contact / user details
     "userIdentification": "Anonymized User",
     "mailbox": "anonymized.user@anonymized.com",
@@ -196,7 +212,6 @@ EXTRINSIC_ANONYMIZATION_MAP: dict[str, str] = {
     "userId": "USER-ID-00000",
     "loginID": "LOGIN-ID-00000",
     "username": "anonymized.user",
-
     # Procurement / document references
     "requestForQuotationRef": "RFQ-0000000000-00000",
     "relatedContractLineItemNo": "CONTRACT-LINE-0000000000-00000",
@@ -215,20 +230,15 @@ EXTRINSIC_ANONYMIZATION_MAP: dict[str, str] = {
     "deliveryNoteID": "DN-ID-00000",
     "shipmentID": "SHIPMENT-ID-00000",
     "trackingNumber": "TRACKING-000000000",
-
     # Financial
     "Ariba.availableAmount": "0.00",
-
     # Work order / operational detail
     "WorkOrderDetail": "Anonymized Work Order Detail",
-
     # Shipment / destination
     "shipmentDestinationCode": "Anonymized Shipment Destination",
-
     # Legal / terms text
     "term": "Anonymized Terms and Conditions.",
     "SpecialText": "Anonymized Special Text",
-
     # Cost centre / GL / org structure
     "costCenter": "COST-CENTER-00000",
     "costCentre": "COST-CENTER-00000",
@@ -241,7 +251,6 @@ EXTRINSIC_ANONYMIZATION_MAP: dict[str, str] = {
     "department": "DEPARTMENT-00000",
     "plant": "PLANT-00000",
     "storageLocation": "STORAGE-LOC-00000",
-
     # Network / system identifiers
     "networkID": "NETWORK-ID-00000",
     "buyerNetworkID": "BUYER-NETWORK-ID-00000",
@@ -249,7 +258,6 @@ EXTRINSIC_ANONYMIZATION_MAP: dict[str, str] = {
     "erpSystemID": "ERP-SYSTEM-ID-00000",
     "systemID": "SYSTEM-ID-00000",
     "instanceID": "INSTANCE-ID-00000",
-
     # Free-text / comments
     "note": "Anonymized note.",
     "comment": "Anonymized comment.",
@@ -258,6 +266,62 @@ EXTRINSIC_ANONYMIZATION_MAP: dict[str, str] = {
 }
 
 CXML_DOCTYPE = '<!DOCTYPE cXML SYSTEM "http://xml.cxml.org/schemas/cXML/1.2.069/cXML.dtd">'
+
+# Pre-compiled regex for _insert_doctype (FIX #7)
+_XML_DECL_RE = re.compile(r"<\?xml[^?]*\?>")
+
+# Pre-compiled regex for safe filename stems (FIX #4)
+_UNSAFE_STEM_CHARS = re.compile(r"[^\w\-.]")
+
+
+# ---------------------------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------------------------
+
+def _stable_id(value: str) -> str:
+    """Return a short, stable, collision-resistant hex string for *value*.
+
+    Used for CSS IDs and Streamlit widget keys.
+    FIX #8 — replaces abs(hash(...)) which is non-deterministic across processes.
+    """
+    return hashlib.sha1(value.encode()).hexdigest()[:12]
+
+
+def _deduplicate_log(log: list[dict]) -> list[dict]:
+    """Remove duplicate log entries while preserving insertion order.
+
+    FIX #12 — extracted from _render_summary_table and the UI expander label
+    so the logic lives in exactly one place.
+    """
+    seen: set[tuple] = set()
+    unique: list[dict] = []
+    for entry in log:
+        key = (entry["field"], entry["original"], entry["anonymized"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(entry)
+    return unique
+
+
+def _sanitize_stem(raw_name: str, max_len: int = 64) -> str:
+    """Return a filesystem-safe stem derived from *raw_name*.
+
+    FIX #4 — prevents path-traversal sequences such as ../../etc/passwd
+    from appearing in output filenames or HTML.
+    """
+    stem = Path(raw_name).stem
+    safe = _UNSAFE_STEM_CHARS.sub("_", stem)
+    return safe[:max_len] or "file"
+
+
+def _looks_like_xml(content: str) -> bool:
+    """Return True only when *content* plausibly contains XML.
+
+    FIX #3 — guards against non-XML files renamed to .xml/.txt that would
+    otherwise be handed directly to the parsers.
+    """
+    stripped = content.lstrip()
+    return stripped.startswith("<?xml") or stripped.startswith("<cXML")
 
 
 # ---------------------------------------------------------------------------
@@ -281,36 +345,21 @@ def detect_region(root: lxml_ET._Element) -> tuple[str, str]:
         if lxml_ET.QName(el.tag).localname == "Country":
             code = el.get("isoCountryCode", "").upper()
             if code in ISO_COUNTRY_TO_REGION:
-                region = ISO_COUNTRY_TO_REGION[code]
-                return region, f"isoCountryCode='{code}'"
+                return ISO_COUNTRY_TO_REGION[code], f"isoCountryCode='{code}'"
 
     # 2. currency attribute on <Money>
     for el in root.iter():
         if lxml_ET.QName(el.tag).localname == "Money":
             currency = el.get("currency", "").upper()
             if currency in CURRENCY_TO_REGION:
-                region = CURRENCY_TO_REGION[currency]
-                return region, f"currency='{currency}'"
+                return CURRENCY_TO_REGION[currency], f"currency='{currency}'"
 
-    # 3. Country text content
-    COUNTRY_NAME_MAP: dict[str, str] = {
-        "australia": "AU", "new zealand": "AU",
-        "united states": "NAMAR", "usa": "NAMAR", "canada": "NAMAR", "mexico": "NAMAR",
-        "japan": "Japan",
-        "germany": "EMEA", "france": "EMEA", "united kingdom": "EMEA",
-        "uk": "EMEA", "england": "EMEA", "netherlands": "EMEA",
-        "spain": "EMEA", "italy": "EMEA", "sweden": "EMEA", "norway": "EMEA",
-        "denmark": "EMEA", "finland": "EMEA", "switzerland": "EMEA",
-        "austria": "EMEA", "belgium": "EMEA", "ireland": "EMEA",
-        "south africa": "EMEA", "united arab emirates": "EMEA", "uae": "EMEA",
-        "saudi arabia": "EMEA",
-    }
+    # 3. Country text content  (FIX #11 — map is now a module-level constant)
     for el in root.iter():
         if lxml_ET.QName(el.tag).localname == "Country" and el.text:
             name = el.text.strip().lower()
-            if name in COUNTRY_NAME_MAP:
-                region = COUNTRY_NAME_MAP[name]
-                return region, f"country name='{el.text.strip()}'"
+            if name in COUNTRY_NAME_TO_REGION:
+                return COUNTRY_NAME_TO_REGION[name], f"country name='{el.text.strip()}'"
 
     # 4. Default fallback
     return DEFAULT_REGION, "fallback default"
@@ -323,23 +372,32 @@ def detect_region(root: lxml_ET._Element) -> tuple[str, str]:
 def validate_cxml_file(xml_content: str) -> tuple[bool, str, str | None]:
     """Validate an uploaded file as a well-formed, structurally correct cXML document.
 
-    Uses defusedxml as a security gate, then lxml for structural inspection.
+    Uses defusedxml as a security gate, then lxml (via the hardened parser) for
+    structural inspection.
 
     Returns:
         (is_valid, message, document_type)
         document_type is None when is_valid is False.
     """
-    # Security gate — raises on malicious XML before anything else
+    # FIX #3 — content sniff before any XML parsing
+    if not _looks_like_xml(xml_content):
+        return False, "File does not appear to contain XML content.", None
+
+    # Security gate — defusedxml raises on entity bombs / malicious constructs
     try:
         safe_ET.fromstring(xml_content.encode())
     except Exception as e:
         return False, f"XML security check failed: {e}", None
 
-    # Structural validation via lxml
+    # Structural validation via lxml with the hardened parser
+    # FIX #9 — each exception class now has its own handler so unexpected
+    # errors surface as clean validation failures rather than unhandled exceptions.
     try:
-        root = lxml_ET.fromstring(xml_content.encode())
+        root = lxml_ET.fromstring(xml_content.encode(), parser=_SAFE_PARSER)
     except lxml_ET.XMLSyntaxError as e:
         return False, f"XML parsing error: {e}", None
+    except Exception as e:
+        return False, f"Unexpected parse error ({type(e).__name__}): {e}", None
 
     root_local = lxml_ET.QName(root.tag).localname
     if root_local != "cXML":
@@ -390,15 +448,18 @@ def apply_header_template(root: lxml_ET._Element) -> list[dict]:
         ("timestamp", "2026-01-01T14:53:00-07:00"),
         ("version", "1.2.069"),
     ]:
-        old_val = root.get(attr, "")
+        old_val = root.get(attr)
         root.set(attr, new_val)
-        if old_val != new_val:
+        # FIX #13 — distinguish "attribute absent" from "attribute present but empty"
+        if old_val is None:
+            log.append({"field": f"<cXML {attr}>", "original": "(not present — added)", "anonymized": new_val})
+        elif old_val != new_val:
             log.append({"field": f"<cXML {attr}>", "original": old_val, "anonymized": new_val})
 
     old_lang = root.get("{http://www.w3.org/XML/1998/namespace}lang", "")
     root.set("{http://www.w3.org/XML/1998/namespace}lang", "en-US")
     if old_lang != "en-US":
-        log.append({"field": "<cXML xml:lang>", "original": old_lang, "anonymized": "en-US"})
+        log.append({"field": "<cXML xml:lang>", "original": old_lang or "(not present — added)", "anonymized": "en-US"})
 
     header = root.find("Header")
     if header is not None:
@@ -409,7 +470,6 @@ def apply_header_template(root: lxml_ET._Element) -> list[dict]:
         ]:
             parent_el = header.find(parent_tag)
             if parent_el is not None:
-                # Capture original identity before replacement
                 old_identity = ""
                 old_domain = ""
                 for cred in parent_el.findall("Credential"):
@@ -421,7 +481,7 @@ def apply_header_template(root: lxml_ET._Element) -> list[dict]:
                 _replace_credential(parent_el, identity, domain)
                 log.append({
                     "field": f"<{parent_tag}/Credential/Identity>",
-                    "original": old_identity,
+                    "original": old_identity or "(not present — added)",
                     "anonymized": identity,
                 })
                 if old_domain and old_domain != domain:
@@ -440,7 +500,7 @@ def apply_header_template(root: lxml_ET._Element) -> list[dict]:
                 if old_ua != "Ariba SN":
                     log.append({
                         "field": "<Sender/UserAgent>",
-                        "original": old_ua,
+                        "original": old_ua or "(empty)",
                         "anonymized": "Ariba SN",
                     })
 
@@ -451,7 +511,7 @@ def apply_header_template(root: lxml_ET._Element) -> list[dict]:
         if old_deploy != "test":
             log.append({
                 "field": "<Request deploymentMode>",
-                "original": old_deploy,
+                "original": old_deploy or "(not present — added)",
                 "anonymized": "test",
             })
 
@@ -464,9 +524,15 @@ def apply_header_template(root: lxml_ET._Element) -> list[dict]:
                 ("orderVersion", "1"),
                 ("type", "new"),
             ]:
-                old_val = orh.get(attr, "")
+                old_val = orh.get(attr)
                 orh.set(attr, new_val)
-                if old_val != new_val:
+                if old_val is None:
+                    log.append({
+                        "field": f"<OrderRequestHeader {attr}>",
+                        "original": "(not present — added)",
+                        "anonymized": new_val,
+                    })
+                elif old_val != new_val:
                     log.append({
                         "field": f"<OrderRequestHeader {attr}>",
                         "original": old_val,
@@ -476,13 +542,12 @@ def apply_header_template(root: lxml_ET._Element) -> list[dict]:
     return log
 
 
-def _replace_credential(
-    parent: lxml_ET._Element | None, identity: str, domain: str
-) -> None:
+def _replace_credential(parent: lxml_ET._Element, identity: str, domain: str) -> None:
     """Remove all Credential / Correspondent children from *parent* and insert
-    a single sanitised Credential element."""
-    if parent is None:
-        return
+    a single sanitised Credential element.
+
+    FIX #14 — removed the dead None guard; all callers already check for None.
+    """
     for child in list(parent):
         if child.tag in ("Credential", "Correspondent"):
             parent.remove(child)
@@ -494,14 +559,12 @@ def _replace_credential(
 def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> list[dict]:
     """Recursively traverse *element* and apply anonymization rules from *profile*.
 
-    Returns a list of dicts with keys:
-        field, original, anonymized
-    suitable for display in a summary table.
+    Returns a list of dicts with keys: field, original, anonymized.
     """
     log: list[dict] = []
 
     for child in element:
-        local_tag = lxml_ET.QName(child.tag).localname  # strip namespace if present
+        local_tag = lxml_ET.QName(child.tag).localname
 
         # --- Element text substitution ---
         if local_tag in profile:
@@ -544,10 +607,9 @@ def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> li
                     "anonymized": "(preserved — unchanged)",
                 })
             else:
-                if extrinsic_name in EXTRINSIC_ANONYMIZATION_MAP:
-                    anonymized_value = EXTRINSIC_ANONYMIZATION_MAP[extrinsic_name]
-                else:
-                    anonymized_value = "ANONYMIZED_EXTRINSIC_VALUE"
+                anonymized_value = EXTRINSIC_ANONYMIZATION_MAP.get(
+                    extrinsic_name, "ANONYMIZED_EXTRINSIC_VALUE"
+                )
                 old_text = child.text or ""
                 child.text = anonymized_value
                 if old_text != anonymized_value:
@@ -571,8 +633,7 @@ def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> li
         # --- Attribute substitution ---
         for attr_name in list(child.attrib):
             local_attr = lxml_ET.QName(attr_name).localname
-            # Never overwrite the Extrinsic name= attribute — it is used as the
-            # lookup key above and must be preserved in the output.
+            # Never overwrite the Extrinsic name= attribute
             if local_tag == "Extrinsic" and local_attr == "name":
                 continue
             if local_attr in profile:
@@ -599,35 +660,41 @@ def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> li
 
 def _insert_doctype(xml_string: str) -> str:
     """Insert the cXML DOCTYPE declaration immediately after the XML declaration.
-    Handles both Unix (LF) and Windows (CRLF) line endings robustly."""
-    try:
-        end = xml_string.index("?>") + 2
-    except ValueError:
-        return CXML_DOCTYPE + "\n" + xml_string
-    return xml_string[:end] + "\n" + CXML_DOCTYPE + xml_string[end:]
+
+    FIX #7 — uses a compiled regex instead of a fragile str.index('?>') search,
+    which could misfire on processing instructions or comments.
+    """
+    match = _XML_DECL_RE.search(xml_string)
+    if match:
+        end = match.end()
+        return xml_string[:end] + "\n" + CXML_DOCTYPE + xml_string[end:]
+    return CXML_DOCTYPE + "\n" + xml_string
 
 
 def process_cxml_content(
     xml_content: str,
+    region_code: str | None = None,
+    detection_method: str | None = None,
 ) -> tuple[str, list[dict], str, str]:
     """Parse, anonymize and serialise a cXML document.
 
-    Region is detected automatically from signals within the document.
-    Validation is assumed to have already passed (via validate_cxml_file).
+    FIX #6 — accepts a pre-detected (region_code, detection_method) pair so the
+    caller can pass in the result already computed during the upload display loop,
+    avoiding a redundant third lxml parse per file.  When both are None the
+    region is auto-detected here as before.
 
     Returns:
         (anonymized_xml_string, substitution_log, region_code, detection_method)
-        substitution_log is a list of dicts with keys: field, original, anonymized
     """
     # Security gate (defusedxml) — result discarded; lxml handles processing
     safe_ET.fromstring(xml_content.encode())
 
-    root: lxml_ET._Element = lxml_ET.fromstring(xml_content.encode())
+    # FIX #1 — use the hardened parser everywhere lxml touches user content
+    root: lxml_ET._Element = lxml_ET.fromstring(xml_content.encode(), parser=_SAFE_PARSER)
 
-    # Auto-detect region before any modifications are made to the tree
-    region_code, detection_method = detect_region(root)
+    if region_code is None or detection_method is None:
+        region_code, detection_method = detect_region(root)
 
-    # Build merged profile — regional values take precedence
     active_profile: dict[str, str] = {**GENERIC_ANONYMIZATION_MAP, **REGIONAL_PROFILES[region_code]}
     active_profile.pop("display_name", None)
 
@@ -661,11 +728,7 @@ def create_zip_file(files_dict: dict[str, str]) -> io.BytesIO:
 # ---------------------------------------------------------------------------
 
 def _render_scrollable_xml(xml_text: str, height_px: int = 400) -> None:
-    """Display XML content inside a scrollable <div> with a fixed max height.
-
-    Uses an HTML <pre><code> block styled to constrain height and scroll
-    independently, so large documents never blow up the page layout.
-    """
+    """Display XML content inside a scrollable <div> with a fixed max height."""
     escaped = _html.escape(xml_text)
     st.markdown(
         f"""
@@ -691,25 +754,18 @@ def _render_scrollable_xml(xml_text: str, height_px: int = 400) -> None:
 # ---------------------------------------------------------------------------
 
 def _render_summary_table(log: list[dict], filename: str, height_px: int = 400) -> None:
-    """Render the substitution log as a scrollable HTML table with a TSV download button.
+    """Render the substitution log as a scrollable HTML table with a TSV download.
 
-    Each entry in *log* is a dict with keys: field, original, anonymized.
-    Duplicates (by all three fields) are removed while preserving order.
+    FIX #12 — deduplication delegated to _deduplicate_log().
+    FIX #8  — CSS table ID uses _stable_id() instead of abs(hash()).
+    FIX #10 — Streamlit widget key uses _stable_id() instead of a mutable counter.
     """
-    # Deduplicate while preserving order
-    seen: set[tuple] = set()
-    unique_log: list[dict] = []
-    for entry in log:
-        key = (entry["field"], entry["original"], entry["anonymized"])
-        if key not in seen:
-            seen.add(key)
-            unique_log.append(entry)
+    unique_log = _deduplicate_log(log)
 
     if not unique_log:
         st.info("No substitutions were recorded for this file.")
         return
 
-    # Build HTML table rows
     rows_html = ""
     for idx, entry in enumerate(unique_log, 1):
         field = _html.escape(entry["field"])
@@ -728,12 +784,11 @@ def _render_summary_table(log: list[dict], filename: str, height_px: int = 400) 
             f"</tr>"
         )
 
-    # Unique ID for this table instance to scope the CSS
-    table_id = f"summary-table-{abs(hash(filename))}"
+    # FIX #8 — stable, collision-resistant CSS ID
+    table_id = f"summary-table-{_stable_id(filename)}"
 
     table_html = f"""
     <style>
-        /* Always-visible scrollbars for this specific table container */
         #{table_id} {{
             max-height: {height_px}px;
             overflow-x: auto !important;
@@ -744,34 +799,16 @@ def _render_summary_table(log: list[dict], filename: str, height_px: int = 400) 
             border-radius: 6px;
             background-color: #0d1117;
         }}
-        /* Webkit (Chrome, Edge, Safari) — always show both scrollbars */
-        #{table_id}::-webkit-scrollbar {{
-            width: 10px;
-            height: 10px;
-        }}
-        #{table_id}::-webkit-scrollbar-track {{
-            background: #161b22;
-            border-radius: 6px;
-        }}
+        #{table_id}::-webkit-scrollbar {{ width: 10px; height: 10px; }}
+        #{table_id}::-webkit-scrollbar-track {{ background: #161b22; border-radius: 6px; }}
         #{table_id}::-webkit-scrollbar-thumb {{
-            background: #484f58;
-            border-radius: 6px;
-            border: 2px solid #161b22;
+            background: #484f58; border-radius: 6px; border: 2px solid #161b22;
         }}
-        #{table_id}::-webkit-scrollbar-thumb:hover {{
-            background: #6e7681;
-        }}
-        #{table_id}::-webkit-scrollbar-corner {{
-            background: #161b22;
-        }}
+        #{table_id}::-webkit-scrollbar-thumb:hover {{ background: #6e7681; }}
+        #{table_id}::-webkit-scrollbar-corner {{ background: #161b22; }}
     </style>
     <div id="{table_id}">
-        <table style="
-            width: max-content;
-            min-width: 100%;
-            border-collapse: collapse;
-            font-size: 0.85rem;
-        ">
+        <table style="width: max-content; min-width: 100%; border-collapse: collapse; font-size: 0.85rem;">
             <thead>
                 <tr style="background-color: #161b22; position: sticky; top: 0; z-index: 1;">
                     <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9;
@@ -788,33 +825,24 @@ def _render_summary_table(log: list[dict], filename: str, height_px: int = 400) 
                         position:sticky; top:0; background-color:#161b22;">Anonymized Value</th>
                 </tr>
             </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
+            <tbody>{rows_html}</tbody>
         </table>
     </div>
     """
     st.markdown(table_html, unsafe_allow_html=True)
 
-    # Build a plain-text TSV version for the copy/download button
     tsv_lines = ["#\tField\tOriginal Value\tAnonymized Value"]
     for idx, entry in enumerate(unique_log, 1):
-        tsv_lines.append(
-            f"{idx}\t{entry['field']}\t{entry['original']}\t{entry['anonymized']}"
-        )
+        tsv_lines.append(f"{idx}\t{entry['field']}\t{entry['original']}\t{entry['anonymized']}")
     tsv_text = "\n".join(tsv_lines)
 
-    # Ensure unique key for each download button across reruns
-    if "tsv_button_counter" not in st.session_state:
-        st.session_state.tsv_button_counter = 0
-    st.session_state.tsv_button_counter += 1
-
+    # FIX #10 — deterministic widget key; no mutable session-state counter needed
     st.download_button(
         label="📋 Download as TSV (paste into Excel / Sheets)",
         data=tsv_text,
         file_name=f"substitution_summary_{filename}.tsv",
         mime="text/tab-separated-values",
-        key=f"tsv_{filename}_{st.session_state.tsv_button_counter}",
+        key=f"tsv_{_stable_id(filename)}",
     )
     st.caption(f"{len(unique_log)} unique substitution(s)")
 
@@ -829,11 +857,9 @@ st.set_page_config(
     layout="wide",
 )
 
-# ---- Inject global CSS to constrain validation expander and preview heights ----
 st.markdown(
     """
     <style>
-    /* Make validation-error expander content scrollable */
     div[data-testid="stExpander"] details div[data-testid="stMarkdownContainer"] {
         max-height: 300px;
         overflow-y: auto;
@@ -843,7 +869,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Session state for the clear-all button
 if "clear_trigger" not in st.session_state:
     st.session_state.clear_trigger = False
 
@@ -899,7 +924,6 @@ with st.sidebar:
     )
 
 # --- File uploader ---
-# Key rotates on clear so Streamlit resets the widget state
 uploader_key = f"file_uploader_{st.session_state.clear_trigger}"
 
 uploaded_files = st.file_uploader(
@@ -910,7 +934,6 @@ uploaded_files = st.file_uploader(
     key=uploader_key,
 )
 
-# Reset clear trigger after rerun has taken effect
 if st.session_state.clear_trigger:
     st.session_state.clear_trigger = False
 
@@ -921,13 +944,32 @@ if not uploaded_files:
 # --- Batch limits ---
 MAX_FILES = 50
 MAX_FILE_SIZE_MB = 10
+# FIX #5 — aggregate memory cap prevents a single malicious batch from
+# exhausting server memory (50 × 10 MB raw → up to ~2.5 GB after lxml parse).
+MAX_TOTAL_BATCH_MB = 50
 
 oversized = [f.name for f in uploaded_files if len(f.getvalue()) > MAX_FILE_SIZE_MB * 1024 * 1024]
+
 if len(uploaded_files) > MAX_FILES:
     st.error(f"❌ Maximum {MAX_FILES} files allowed per batch. You uploaded {len(uploaded_files)}.")
     st.stop()
+
 if oversized:
-    st.error(f"❌ The following file(s) exceed the {MAX_FILE_SIZE_MB} MB size limit and cannot be processed: {', '.join(oversized)}")
+    # FIX #2 — escape filenames before embedding in any message rendered as HTML;
+    # here st.error uses markdown so escaping is still good practice.
+    safe_names = ", ".join(_html.escape(n) for n in oversized)
+    st.error(
+        f"❌ The following file(s) exceed the {MAX_FILE_SIZE_MB} MB size limit "
+        f"and cannot be processed: {safe_names}"
+    )
+    st.stop()
+
+total_bytes = sum(len(f.getvalue()) for f in uploaded_files)
+if total_bytes > MAX_TOTAL_BATCH_MB * 1024 * 1024:
+    st.error(
+        f"❌ Total upload size ({total_bytes / 1024 / 1024:.1f} MB) exceeds the "
+        f"{MAX_TOTAL_BATCH_MB} MB batch limit. Please upload fewer or smaller files."
+    )
     st.stop()
 
 # --- Per-file configuration ---
@@ -941,26 +983,30 @@ for i, uploaded_file in enumerate(uploaded_files):
     file_content = uploaded_file.getvalue().decode("utf-8")
     is_valid, validation_message, doc_type = validate_cxml_file(file_content)
 
-    # Pre-detect region for display (only for valid files)
-    detected_region_label = ""
-    detected_by = ""
+    # FIX #6 — detect region once here and store it in file_configs so
+    # process_cxml_content does not need to parse a third time per file.
+    detected_code = DEFAULT_REGION
+    detected_by = "fallback default"
+    detected_region_label = REGIONAL_PROFILES[DEFAULT_REGION]["display_name"]
+
     if is_valid:
         try:
-            root_preview = lxml_ET.fromstring(file_content.encode())
+            root_preview = lxml_ET.fromstring(file_content.encode(), parser=_SAFE_PARSER)
             detected_code, detected_by = detect_region(root_preview)
             detected_region_label = REGIONAL_PROFILES[detected_code]["display_name"]
         except Exception:
-            detected_region_label = REGIONAL_PROFILES[DEFAULT_REGION]["display_name"]
-            detected_by = "fallback default"
+            pass  # keep defaults set above
 
     with st.container():
-        # ---- Row 1: file name | region | doc type / status ----
         col1, col2, col3 = st.columns([2, 2, 1])
+
+        # FIX #2 — escape filename before inserting into unsafe_allow_html blocks
+        safe_display_name = _html.escape(uploaded_file.name)
 
         with col1:
             file_size = len(uploaded_file.getvalue()) / 1024
             st.markdown(
-                f"**📄 {uploaded_file.name}**  \n"
+                f"**📄 {safe_display_name}**  \n"
                 f"<span style='color:gray; font-size:0.85rem;'>"
                 f"Size: {file_size:.1f} KB</span>",
                 unsafe_allow_html=True,
@@ -968,10 +1014,12 @@ for i, uploaded_file in enumerate(uploaded_files):
 
         with col2:
             if is_valid:
+                safe_region_label = _html.escape(detected_region_label)
+                safe_detected_by = _html.escape(detected_by)
                 st.markdown(
-                    f"🌍 **{detected_region_label}**  \n"
+                    f"🌍 **{safe_region_label}**  \n"
                     f"<span style='color:gray; font-size:0.85rem;'>"
-                    f"Detected via: {detected_by}</span>",
+                    f"Detected via: {safe_detected_by}</span>",
                     unsafe_allow_html=True,
                 )
             else:
@@ -979,6 +1027,7 @@ for i, uploaded_file in enumerate(uploaded_files):
 
         with col3:
             if is_valid:
+                safe_doc_type = _html.escape(doc_type or "")
                 st.markdown(
                     f"<div style='"
                     f"background-color: #0e4429;"
@@ -990,47 +1039,44 @@ for i, uploaded_file in enumerate(uploaded_files):
                     f"color: #3fb950;"
                     f"line-height: 1.3;"
                     f"margin-top: 0.25rem;"
-                    f"'>✅ {doc_type}</div>",
+                    f"'>✅ {safe_doc_type}</div>",
                     unsafe_allow_html=True,
                 )
             else:
                 st.markdown(
-                    f"<div style='"
-                    f"background-color: #4a1a1a;"
-                    f"border: 1px solid #d73a49;"
-                    f"border-radius: 6px;"
-                    f"padding: 0.35rem 0.6rem;"
-                    f"text-align: center;"
-                    f"font-size: 0.85rem;"
-                    f"color: #f85149;"
-                    f"line-height: 1.3;"
-                    f"margin-top: 0.25rem;"
-                    f"'>❌ Invalid</div>",
+                    "<div style='"
+                    "background-color: #4a1a1a;"
+                    "border: 1px solid #d73a49;"
+                    "border-radius: 6px;"
+                    "padding: 0.35rem 0.6rem;"
+                    "text-align: center;"
+                    "font-size: 0.85rem;"
+                    "color: #f85149;"
+                    "line-height: 1.3;"
+                    "margin-top: 0.25rem;"
+                    "'>❌ Invalid</div>",
                     unsafe_allow_html=True,
                 )
                 validation_errors.append(
-                    f"**{uploaded_file.name}:** {validation_message}"
+                    f"**{safe_display_name}:** {_html.escape(validation_message)}"
                 )
 
-        # ---- Row 2: full-width preview expander ----
-        with st.expander(f"👁️ Preview source — {uploaded_file.name}"):
+        with st.expander(f"👁️ Preview source — {safe_display_name}"):
             _render_scrollable_xml(file_content, height_px=300)
 
-        # ---- Collect valid files for processing ----
         if is_valid:
-            file_configs.append(
-                {
-                    "file": uploaded_file,
-                    "doc_type": doc_type,
-                }
-            )
+            file_configs.append({
+                "file": uploaded_file,
+                "doc_type": doc_type,
+                # FIX #6 — carry pre-detected region through to avoid re-parsing
+                "region_code": detected_code,
+                "detection_method": detected_by,
+            })
 
         st.divider()
 
-# Validation errors grouped in one compact, scrollable expander
 if validation_errors:
     with st.expander("⚠️ Validation Errors — click to expand", expanded=True):
-        # Wrap errors in a height-constrained scrollable div
         error_html = "".join(
             f"<p style='color:#faad14; margin:0.3rem 0;'>⚠️ {err}</p>"
             for err in validation_errors
@@ -1052,7 +1098,6 @@ if validation_errors:
             unsafe_allow_html=True,
         )
 
-# File summary bar
 valid_count = len(file_configs)
 invalid_count = len(uploaded_files) - valid_count
 
@@ -1064,7 +1109,6 @@ if valid_count > 0:
 else:
     st.warning("⚠️ No valid cXML files to process. Please upload valid cXML documents.")
 
-# --- Anonymize button — disabled when nothing valid to process ---
 dry_run = st.checkbox(
     "🔍 Dry-run mode — preview substitutions without downloading",
     value=False,
@@ -1082,7 +1126,7 @@ if not st.button(
     st.stop()
 
 anonymized_files: dict[str, str] = {}
-processing_logs: dict[str, dict[str, any]] = {}
+processing_logs: dict[str, dict] = {}
 errors: list[str] = []
 
 progress_bar = st.progress(0)
@@ -1094,13 +1138,23 @@ for i, config in enumerate(file_configs):
 
     try:
         xml_content = file.getvalue().decode("utf-8")
-        anonymized_content, log, region_code, detection_method = process_cxml_content(xml_content)
+
+        # FIX #6 — pass pre-detected region so process_cxml_content skips re-detection
+        anonymized_content, log, region_code, detection_method = process_cxml_content(
+            xml_content,
+            region_code=config["region_code"],
+            detection_method=config["detection_method"],
+        )
         region_display = REGIONAL_PROFILES[region_code]["display_name"]
-        stem = Path(file.name).stem
-        suffix = Path(file.name).suffix  # preserves .xml or .txt
-        output_filename = f"anonymized_{stem}{suffix}"
+
+        # FIX #4 — sanitize stem to prevent path traversal in output filenames
+        safe_stem = _sanitize_stem(file.name)
+        suffix = Path(file.name).suffix
+        output_filename = f"anonymized_{safe_stem}{suffix}"
+
         if not dry_run:
             anonymized_files[output_filename] = anonymized_content
+
         processing_logs[output_filename] = {
             "log": log,
             "region": region_display,
@@ -1109,9 +1163,9 @@ for i, config in enumerate(file_configs):
             "dry_run": dry_run,
         }
     except ValueError as e:
-        errors.append(f"❌ **{file.name}** — Validation error: {e}")
+        errors.append(f"❌ **{_html.escape(file.name)}** — Validation error: {e}")
     except Exception as e:
-        errors.append(f"❌ **{file.name}** — {type(e).__name__}: {e}")
+        errors.append(f"❌ **{_html.escape(file.name)}** — {type(e).__name__}: {e}")
 
     progress_bar.progress((i + 1) / len(file_configs))
 
@@ -1151,9 +1205,10 @@ if not dry_run and anonymized_files:
 
     st.markdown("**Individual Files:**")
     for filename, content in anonymized_files.items():
+        safe_filename = _html.escape(filename)   # FIX #2
         col1, col2 = st.columns([3, 1])
         with col1:
-            with st.expander(f"👁️ Preview: {filename}"):
+            with st.expander(f"👁️ Preview: {safe_filename}"):
                 _render_scrollable_xml(content, height_px=1000)
         with col2:
             st.download_button(
@@ -1161,7 +1216,7 @@ if not dry_run and anonymized_files:
                 data=content,
                 file_name=filename,
                 mime="application/xml",
-                key=f"download_{filename}",
+                key=f"download_{_stable_id(filename)}",  # FIX #8
             )
 
 # --- Processing summary ---
@@ -1177,16 +1232,16 @@ for filename, info in processing_logs.items():
     is_dry_run = info["dry_run"]
     dry_run_badge = " 🔍 Dry-run" if is_dry_run else ""
 
-    # Count unique entries for the expander label
-    seen_keys: set[tuple] = set()
-    for entry in log:
-        seen_keys.add((entry["field"], entry["original"], entry["anonymized"]))
-    unique_count = len(seen_keys)
+    # FIX #12 — use shared helper; no duplicated deduplication logic here
+    unique_count = len(_deduplicate_log(log))
+    safe_filename = _html.escape(filename)   # FIX #2
 
     with st.expander(
-        f"🔍 {filename} — {region} — {unique_count} substitution(s){dry_run_badge}"
+        f"🔍 {safe_filename} — {_html.escape(region)} — {unique_count} substitution(s){dry_run_badge}"
     ):
-        st.caption(f"Processed at: {processed_at} | Region detected via: {detection_method}")
+        st.caption(
+            f"Processed at: {processed_at} | Region detected via: {_html.escape(detection_method)}"
+        )
         _render_summary_table(log, filename, height_px=700)
 
 # --- Footer ---
