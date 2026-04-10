@@ -717,32 +717,75 @@ def _render_summary_table(log: list[dict], filename: str, height_px: int = 400) 
         anonymized = _html.escape(entry["anonymized"])
         rows_html += (
             f"<tr>"
-            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#aaa; text-align:center;'>{idx}</td>"
-            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#79c0ff; font-family:monospace; font-size:0.82rem;'>{field}</td>"
-            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#f85149; font-family:monospace; font-size:0.82rem;'>{original}</td>"
-            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#3fb950; font-family:monospace; font-size:0.82rem;'>{anonymized}</td>"
+            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#aaa; "
+            f"text-align:center; white-space:nowrap;'>{idx}</td>"
+            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#79c0ff; "
+            f"font-family:monospace; font-size:0.82rem; white-space:nowrap;'>{field}</td>"
+            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#f85149; "
+            f"font-family:monospace; font-size:0.82rem; white-space:nowrap;'>{original}</td>"
+            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#3fb950; "
+            f"font-family:monospace; font-size:0.82rem; white-space:nowrap;'>{anonymized}</td>"
             f"</tr>"
         )
 
+    # Unique ID for this table instance to scope the CSS
+    table_id = f"summary-table-{abs(hash(filename))}"
+
     table_html = f"""
-    <div style="
-        max-height: {height_px}px;
-        overflow: auto;
-        border: 1px solid #444;
-        border-radius: 6px;
-        background-color: #0d1117;
-    ">
-        <table style="
+    <style>
+        /* Always-visible scrollbars for this specific table container */
+        #{table_id} {{
+            max-height: {height_px}px;
+            overflow-x: auto !important;
+            overflow-y: auto !important;
+            display: block;
             width: 100%;
+            border: 1px solid #444;
+            border-radius: 6px;
+            background-color: #0d1117;
+        }}
+        /* Webkit (Chrome, Edge, Safari) — always show both scrollbars */
+        #{table_id}::-webkit-scrollbar {{
+            width: 10px;
+            height: 10px;
+        }}
+        #{table_id}::-webkit-scrollbar-track {{
+            background: #161b22;
+            border-radius: 6px;
+        }}
+        #{table_id}::-webkit-scrollbar-thumb {{
+            background: #484f58;
+            border-radius: 6px;
+            border: 2px solid #161b22;
+        }}
+        #{table_id}::-webkit-scrollbar-thumb:hover {{
+            background: #6e7681;
+        }}
+        #{table_id}::-webkit-scrollbar-corner {{
+            background: #161b22;
+        }}
+    </style>
+    <div id="{table_id}">
+        <table style="
+            width: max-content;
+            min-width: 100%;
             border-collapse: collapse;
             font-size: 0.85rem;
         ">
             <thead>
                 <tr style="background-color: #161b22; position: sticky; top: 0; z-index: 1;">
-                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9; text-align:center; width:50px;">#</th>
-                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9; text-align:left;">Field</th>
-                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9; text-align:left;">Original Value</th>
-                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9; text-align:left;">Anonymized Value</th>
+                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9;
+                        text-align:center; width:50px; white-space:nowrap;
+                        position:sticky; top:0; background-color:#161b22;">#</th>
+                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9;
+                        text-align:left; min-width:250px; white-space:nowrap;
+                        position:sticky; top:0; background-color:#161b22;">Field</th>
+                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9;
+                        text-align:left; min-width:280px; white-space:nowrap;
+                        position:sticky; top:0; background-color:#161b22;">Original Value</th>
+                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9;
+                        text-align:left; min-width:280px; white-space:nowrap;
+                        position:sticky; top:0; background-color:#161b22;">Anonymized Value</th>
                 </tr>
             </thead>
             <tbody>
@@ -761,12 +804,17 @@ def _render_summary_table(log: list[dict], filename: str, height_px: int = 400) 
         )
     tsv_text = "\n".join(tsv_lines)
 
+    # Ensure unique key for each download button across reruns
+    if "tsv_button_counter" not in st.session_state:
+        st.session_state.tsv_button_counter = 0
+    st.session_state.tsv_button_counter += 1
+
     st.download_button(
         label="📋 Download as TSV (paste into Excel / Sheets)",
         data=tsv_text,
         file_name=f"substitution_summary_{filename}.tsv",
         mime="text/tab-separated-values",
-        key=f"tsv_{filename}_{len(unique_log)}",
+        key=f"tsv_{filename}_{st.session_state.tsv_button_counter}",
     )
     st.caption(f"{len(unique_log)} unique substitution(s)")
 
@@ -1106,7 +1154,7 @@ if not dry_run and anonymized_files:
         col1, col2 = st.columns([3, 1])
         with col1:
             with st.expander(f"👁️ Preview: {filename}"):
-                _render_scrollable_xml(content, height_px=400)
+                _render_scrollable_xml(content, height_px=1000)
         with col2:
             st.download_button(
                 label="📥 Download",
@@ -1139,7 +1187,7 @@ for filename, info in processing_logs.items():
         f"🔍 {filename} — {region} — {unique_count} substitution(s){dry_run_badge}"
     ):
         st.caption(f"Processed at: {processed_at} | Region detected via: {detection_method}")
-        _render_summary_table(log, filename, height_px=400)
+        _render_summary_table(log, filename, height_px=700)
 
 # --- Footer ---
 st.divider()
