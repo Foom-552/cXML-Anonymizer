@@ -273,6 +273,13 @@ _XML_DECL_RE = re.compile(r"<\?xml[^?]*\?>")
 # Pre-compiled regex for safe filename stems (FIX #4)
 _UNSAFE_STEM_CHARS = re.compile(r"[^\w\-.]")
 
+# Batch upload limits
+MAX_FILES = 50
+MAX_FILE_SIZE_MB = 10
+# FIX #5 — aggregate memory cap prevents a single malicious batch from
+# exhausting server memory (50 × 10 MB raw → up to ~2.5 GB after lxml parse).
+MAX_TOTAL_BATCH_MB = 50
+
 
 # ---------------------------------------------------------------------------
 # HELPERS
@@ -340,23 +347,31 @@ def detect_region(root: lxml_ET._Element) -> tuple[str, str]:
     Returns:
         (region_code, detection_method_description)
     """
-    # 1. isoCountryCode attribute
+    # Single pass — collect Country and Money elements to avoid three full tree scans.
+    country_els: list[lxml_ET._Element] = []
+    money_els: list[lxml_ET._Element] = []
     for el in root.iter():
-        if lxml_ET.QName(el.tag).localname == "Country":
-            code = el.get("isoCountryCode", "").upper()
-            if code in ISO_COUNTRY_TO_REGION:
-                return ISO_COUNTRY_TO_REGION[code], f"isoCountryCode='{code}'"
+        local = lxml_ET.QName(el.tag).localname
+        if local == "Country":
+            country_els.append(el)
+        elif local == "Money":
+            money_els.append(el)
+
+    # 1. isoCountryCode attribute
+    for el in country_els:
+        code = el.get("isoCountryCode", "").upper()
+        if code in ISO_COUNTRY_TO_REGION:
+            return ISO_COUNTRY_TO_REGION[code], f"isoCountryCode='{code}'"
 
     # 2. currency attribute on <Money>
-    for el in root.iter():
-        if lxml_ET.QName(el.tag).localname == "Money":
-            currency = el.get("currency", "").upper()
-            if currency in CURRENCY_TO_REGION:
-                return CURRENCY_TO_REGION[currency], f"currency='{currency}'"
+    for el in money_els:
+        currency = el.get("currency", "").upper()
+        if currency in CURRENCY_TO_REGION:
+            return CURRENCY_TO_REGION[currency], f"currency='{currency}'"
 
     # 3. Country text content  (FIX #11 — map is now a module-level constant)
-    for el in root.iter():
-        if lxml_ET.QName(el.tag).localname == "Country" and el.text:
+    for el in country_els:
+        if el.text:
             name = el.text.strip().lower()
             if name in COUNTRY_NAME_TO_REGION:
                 return COUNTRY_NAME_TO_REGION[name], f"country name='{el.text.strip()}'"
@@ -581,21 +596,23 @@ def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> li
         if local_tag == "Money" and "currency" in profile:
             old_curr = child.get("currency", "")
             child.set("currency", profile["currency"])
-            log.append({
-                "field": "<Money currency>",
-                "original": old_curr,
-                "anonymized": profile["currency"],
-            })
+            if old_curr != profile["currency"]:
+                log.append({
+                    "field": "<Money currency>",
+                    "original": old_curr,
+                    "anonymized": profile["currency"],
+                })
 
         # Special-case: Country isoCountryCode attribute
         if local_tag == "Country" and "isoCountryCode" in profile:
             old_code = child.get("isoCountryCode", "")
             child.set("isoCountryCode", profile["isoCountryCode"])
-            log.append({
-                "field": "<Country isoCountryCode>",
-                "original": old_code,
-                "anonymized": profile["isoCountryCode"],
-            })
+            if old_code != profile["isoCountryCode"]:
+                log.append({
+                    "field": "<Country isoCountryCode>",
+                    "original": old_code,
+                    "anonymized": profile["isoCountryCode"],
+                })
 
         # Extrinsic handling
         if local_tag == "Extrinsic":
@@ -686,9 +703,6 @@ def process_cxml_content(
     Returns:
         (anonymized_xml_string, substitution_log, region_code, detection_method)
     """
-    # Security gate (defusedxml) — result discarded; lxml handles processing
-    safe_ET.fromstring(xml_content.encode())
-
     # FIX #1 — use the hardened parser everywhere lxml touches user content
     root: lxml_ET._Element = lxml_ET.fromstring(xml_content.encode(), parser=_SAFE_PARSER)
 
@@ -941,13 +955,6 @@ if not uploaded_files:
     st.info("👆 Please upload one or more cXML files to get started. Accepted formats: .xml and .txt")
     st.stop()
 
-# --- Batch limits ---
-MAX_FILES = 50
-MAX_FILE_SIZE_MB = 10
-# FIX #5 — aggregate memory cap prevents a single malicious batch from
-# exhausting server memory (50 × 10 MB raw → up to ~2.5 GB after lxml parse).
-MAX_TOTAL_BATCH_MB = 50
-
 oversized = [f.name for f in uploaded_files if len(f.getvalue()) > MAX_FILE_SIZE_MB * 1024 * 1024]
 
 if len(uploaded_files) > MAX_FILES:
@@ -980,8 +987,14 @@ file_configs: list[dict] = []
 validation_errors: list[str] = []
 
 for i, uploaded_file in enumerate(uploaded_files):
-    file_content = uploaded_file.getvalue().decode("utf-8")
-    is_valid, validation_message, doc_type = validate_cxml_file(file_content)
+    raw = uploaded_file.getvalue()
+    try:
+        file_content = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        is_valid, validation_message, doc_type = False, f"File is not valid UTF-8: {exc}", None
+        file_content = ""
+    else:
+        is_valid, validation_message, doc_type = validate_cxml_file(file_content)
 
     # FIX #6 — detect region once here and store it in file_configs so
     # process_cxml_content does not need to parse a third time per file.
@@ -1004,7 +1017,7 @@ for i, uploaded_file in enumerate(uploaded_files):
         safe_display_name = _html.escape(uploaded_file.name)
 
         with col1:
-            file_size = len(uploaded_file.getvalue()) / 1024
+            file_size = len(raw) / 1024
             st.markdown(
                 f"**📄 {safe_display_name}**  \n"
                 f"<span style='color:gray; font-size:0.85rem;'>"
@@ -1071,6 +1084,7 @@ for i, uploaded_file in enumerate(uploaded_files):
                 # FIX #6 — carry pre-detected region through to avoid re-parsing
                 "region_code": detected_code,
                 "detection_method": detected_by,
+                "xml_content": file_content,
             })
 
         st.divider()
@@ -1137,7 +1151,7 @@ for i, config in enumerate(file_configs):
     status_text.text(f"{'Previewing' if dry_run else 'Processing'} {file.name}…")
 
     try:
-        xml_content = file.getvalue().decode("utf-8")
+        xml_content = config["xml_content"]
 
         # FIX #6 — pass pre-detected region so process_cxml_content skips re-detection
         anonymized_content, log, region_code, detection_method = process_cxml_content(
