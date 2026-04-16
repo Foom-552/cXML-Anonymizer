@@ -1,0 +1,16 @@
+[server]
+maxUploadSize = 10
+
+[logger]
+level = "warning"
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"
+primaryColor = "#0070F3"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#1A1A2E"
+font = "sans serif"

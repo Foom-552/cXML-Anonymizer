@@ -884,7 +884,7 @@ st.markdown(
 )
 
 if "clear_trigger" not in st.session_state:
-    st.session_state.clear_trigger = False
+    st.session_state.clear_trigger = 0
 
 st.title("🔒 cXML Anonymizer Tool")
 st.markdown(
@@ -926,7 +926,7 @@ with st.sidebar:
 
     st.header("🔄 Reset")
     if st.button("🗑️ Clear All Files", use_container_width=True):
-        st.session_state.clear_trigger = True
+        st.session_state.clear_trigger += 1
         st.rerun()
 
     st.divider()
@@ -947,9 +947,6 @@ uploaded_files = st.file_uploader(
     help="Select one or more cXML documents to anonymize. Accepts .xml and .txt files containing cXML content.",
     key=uploader_key,
 )
-
-if st.session_state.clear_trigger:
-    st.session_state.clear_trigger = False
 
 if not uploaded_files:
     st.info("👆 Please upload one or more cXML files to get started. Accepted formats: .xml and .txt")
