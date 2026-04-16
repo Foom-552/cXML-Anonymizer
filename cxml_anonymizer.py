@@ -749,14 +749,14 @@ def _render_scrollable_xml(xml_text: str, height_px: int = 400) -> None:
         <div style="
             max-height: {height_px}px;
             overflow: auto;
-            border: 1px solid #444;
+            border: 1px solid var(--tc-border);
             border-radius: 6px;
-            background-color: #0e1117;
+            background-color: var(--tc-bg-primary);
             padding: 0.75rem;
             font-size: 0.82rem;
             line-height: 1.4;
         ">
-            <pre style="margin:0; white-space:pre; color:#fafafa;"><code>{escaped}</code></pre>
+            <pre style="margin:0; white-space:pre; color:var(--tc-text-code);"><code>{escaped}</code></pre>
         </div>
         """,
         unsafe_allow_html=True,
@@ -787,13 +787,13 @@ def _render_summary_table(log: list[dict], filename: str, height_px: int = 400) 
         anonymized = _html.escape(entry["anonymized"])
         rows_html += (
             f"<tr>"
-            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#aaa; "
+            f"<td style='padding:6px 10px; border-bottom:1px solid var(--tc-border-row); color:var(--tc-text-secondary); "
             f"text-align:center; white-space:nowrap;'>{idx}</td>"
-            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#79c0ff; "
+            f"<td style='padding:6px 10px; border-bottom:1px solid var(--tc-border-row); color:var(--tc-text-field); "
             f"font-family:monospace; font-size:0.82rem; white-space:nowrap;'>{field}</td>"
-            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#f85149; "
+            f"<td style='padding:6px 10px; border-bottom:1px solid var(--tc-border-row); color:var(--tc-text-original); "
             f"font-family:monospace; font-size:0.82rem; white-space:nowrap;'>{original}</td>"
-            f"<td style='padding:6px 10px; border-bottom:1px solid #333; color:#3fb950; "
+            f"<td style='padding:6px 10px; border-bottom:1px solid var(--tc-border-row); color:var(--tc-text-anonymized); "
             f"font-family:monospace; font-size:0.82rem; white-space:nowrap;'>{anonymized}</td>"
             f"</tr>"
         )
@@ -809,34 +809,34 @@ def _render_summary_table(log: list[dict], filename: str, height_px: int = 400) 
             overflow-y: auto !important;
             display: block;
             width: 100%;
-            border: 1px solid #444;
+            border: 1px solid var(--tc-border);
             border-radius: 6px;
-            background-color: #0d1117;
+            background-color: var(--tc-bg-primary);
         }}
         #{table_id}::-webkit-scrollbar {{ width: 10px; height: 10px; }}
-        #{table_id}::-webkit-scrollbar-track {{ background: #161b22; border-radius: 6px; }}
+        #{table_id}::-webkit-scrollbar-track {{ background: var(--tc-scrollbar-track); border-radius: 6px; }}
         #{table_id}::-webkit-scrollbar-thumb {{
-            background: #484f58; border-radius: 6px; border: 2px solid #161b22;
+            background: var(--tc-scrollbar-thumb); border-radius: 6px; border: 2px solid var(--tc-scrollbar-track);
         }}
-        #{table_id}::-webkit-scrollbar-thumb:hover {{ background: #6e7681; }}
-        #{table_id}::-webkit-scrollbar-corner {{ background: #161b22; }}
+        #{table_id}::-webkit-scrollbar-thumb:hover {{ background: var(--tc-scrollbar-thumb-hover); }}
+        #{table_id}::-webkit-scrollbar-corner {{ background: var(--tc-scrollbar-track); }}
     </style>
     <div id="{table_id}">
         <table style="width: max-content; min-width: 100%; border-collapse: collapse; font-size: 0.85rem;">
             <thead>
-                <tr style="background-color: #161b22; position: sticky; top: 0; z-index: 1;">
-                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9;
+                <tr style="background-color: var(--tc-bg-secondary); position: sticky; top: 0; z-index: 1;">
+                    <th style="padding:8px 10px; border-bottom:2px solid var(--tc-border); color:var(--tc-text-primary);
                         text-align:center; width:50px; white-space:nowrap;
-                        position:sticky; top:0; background-color:#161b22;">#</th>
-                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9;
+                        position:sticky; top:0; background-color:var(--tc-bg-secondary);">#</th>
+                    <th style="padding:8px 10px; border-bottom:2px solid var(--tc-border); color:var(--tc-text-primary);
                         text-align:left; min-width:250px; white-space:nowrap;
-                        position:sticky; top:0; background-color:#161b22;">Field</th>
-                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9;
+                        position:sticky; top:0; background-color:var(--tc-bg-secondary);">Field</th>
+                    <th style="padding:8px 10px; border-bottom:2px solid var(--tc-border); color:var(--tc-text-primary);
                         text-align:left; min-width:280px; white-space:nowrap;
-                        position:sticky; top:0; background-color:#161b22;">Original Value</th>
-                    <th style="padding:8px 10px; border-bottom:2px solid #444; color:#c9d1d9;
+                        position:sticky; top:0; background-color:var(--tc-bg-secondary);">Original Value</th>
+                    <th style="padding:8px 10px; border-bottom:2px solid var(--tc-border); color:var(--tc-text-primary);
                         text-align:left; min-width:280px; white-space:nowrap;
-                        position:sticky; top:0; background-color:#161b22;">Anonymized Value</th>
+                        position:sticky; top:0; background-color:var(--tc-bg-secondary);">Anonymized Value</th>
                 </tr>
             </thead>
             <tbody>{rows_html}</tbody>
@@ -862,6 +862,180 @@ def _render_summary_table(log: list[dict], filename: str, height_px: int = 400) 
 
 
 # ---------------------------------------------------------------------------
+# THEME  — CSS custom-property injection
+# ---------------------------------------------------------------------------
+
+def _inject_theme_css(dark: bool) -> None:
+    """Inject a single <style> block that sets all --tc-* CSS variables
+    and (in dark mode) overrides the Streamlit chrome so the entire app
+    is visually consistent across both modes.
+    """
+    if dark:
+        vars_css = """
+        :root {
+            --tc-bg-primary:            #0e1117;
+            --tc-bg-secondary:          #161b22;
+            --tc-bg-valid:              #0e4429;
+            --tc-bg-invalid:            #4a1a1a;
+            --tc-bg-warning:            #1a1a2e;
+            --tc-border:                #444444;
+            --tc-border-valid:          #238636;
+            --tc-border-invalid:        #d73a49;
+            --tc-border-row:            #333333;
+            --tc-text-primary:          #c9d1d9;
+            --tc-text-secondary:        #8b949e;
+            --tc-text-code:             #fafafa;
+            --tc-text-field:            #79c0ff;
+            --tc-text-original:         #f85149;
+            --tc-text-anonymized:       #3fb950;
+            --tc-text-valid:            #3fb950;
+            --tc-text-invalid:          #f85149;
+            --tc-text-warning:          #faad14;
+            --tc-scrollbar-track:       #161b22;
+            --tc-scrollbar-thumb:       #484f58;
+            --tc-scrollbar-thumb-hover: #6e7681;
+        }
+        """
+        chrome_css = """
+        /* ---- Streamlit chrome: dark overrides ---- */
+        .stApp,
+        [data-testid="stAppViewContainer"] {
+            background-color: #0e1117 !important;
+        }
+        [data-testid="stSidebar"],
+        [data-testid="stSidebar"] > div:first-child {
+            background-color: #161b22 !important;
+        }
+        [data-testid="stHeader"] {
+            background-color: #161b22 !important;
+            border-bottom: 1px solid #30363d !important;
+        }
+        /* Headings */
+        .stApp h1, .stApp h2, .stApp h3,
+        .stApp h4, .stApp h5, .stApp h6 {
+            color: #e6edf3 !important;
+        }
+        /* Body text */
+        [data-testid="stMarkdownContainer"] p,
+        [data-testid="stMarkdownContainer"] li,
+        [data-testid="stMarkdownContainer"] span:not([data-testid]),
+        .stCaption, .stText {
+            color: #c9d1d9 !important;
+        }
+        /* Sidebar text */
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] li,
+        [data-testid="stSidebar"] span,
+        [data-testid="stSidebar"] label {
+            color: #c9d1d9 !important;
+        }
+        /* Sidebar headers */
+        [data-testid="stSidebar"] h1,
+        [data-testid="stSidebar"] h2,
+        [data-testid="stSidebar"] h3 {
+            color: #e6edf3 !important;
+        }
+        /* Dividers */
+        hr { border-color: #30363d !important; }
+        /* Toggle & checkbox labels */
+        .stCheckbox label, .stToggle label {
+            color: #c9d1d9 !important;
+        }
+        /* Expander */
+        [data-testid="stExpander"] summary {
+            color: #c9d1d9 !important;
+            background-color: #161b22 !important;
+        }
+        [data-testid="stExpander"] details {
+            border-color: #30363d !important;
+            background-color: #0e1117 !important;
+        }
+        /* File uploader */
+        [data-testid="stFileUploader"] {
+            background-color: #161b22 !important;
+            border-color: #30363d !important;
+        }
+        [data-testid="stFileUploader"] label,
+        [data-testid="stFileUploader"] span,
+        [data-testid="stFileUploader"] p {
+            color: #c9d1d9 !important;
+        }
+        /* Buttons */
+        [data-testid="stButton"] button,
+        [data-testid="stDownloadButton"] button {
+            background-color: #21262d !important;
+            border-color: #30363d !important;
+            color: #c9d1d9 !important;
+        }
+        [data-testid="stButton"] button:hover,
+        [data-testid="stDownloadButton"] button:hover {
+            background-color: #30363d !important;
+            border-color: #8b949e !important;
+        }
+        /* Alert / info / success / warning / error boxes */
+        [data-testid="stAlert"] {
+            background-color: #161b22 !important;
+            border-color: #30363d !important;
+        }
+        [data-testid="stAlert"] p {
+            color: #c9d1d9 !important;
+        }
+        /* Progress bar */
+        [data-testid="stProgressBar"] > div > div {
+            background-color: #1f6feb !important;
+        }
+        /* Checkbox */
+        .stCheckbox span[data-baseweb="checkbox"] {
+            background-color: #21262d !important;
+        }
+        /* Expander overflow */
+        div[data-testid="stExpander"] details div[data-testid="stMarkdownContainer"] {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        """
+    else:
+        vars_css = """
+        :root {
+            --tc-bg-primary:            #f6f8fa;
+            --tc-bg-secondary:          #ffffff;
+            --tc-bg-valid:              #dafbe1;
+            --tc-bg-invalid:            #ffebe9;
+            --tc-bg-warning:            #fff8c5;
+            --tc-border:                #d0d7de;
+            --tc-border-valid:          #2da44e;
+            --tc-border-invalid:        #d1242f;
+            --tc-border-row:            #e0e5ea;
+            --tc-text-primary:          #1f2328;
+            --tc-text-secondary:        #636c76;
+            --tc-text-code:             #24292f;
+            --tc-text-field:            #0550ae;
+            --tc-text-original:         #cf222e;
+            --tc-text-anonymized:       #1a7f37;
+            --tc-text-valid:            #1a7f37;
+            --tc-text-invalid:          #cf222e;
+            --tc-text-warning:          #9a6700;
+            --tc-scrollbar-track:       #f0f2f6;
+            --tc-scrollbar-thumb:       #c8ccd1;
+            --tc-scrollbar-thumb-hover: #9ba0a8;
+        }
+        """
+        # Light mode: Streamlit's own light theme (config.toml base=light) is correct;
+        # only add the expander overflow fix.
+        chrome_css = """
+        div[data-testid="stExpander"] details div[data-testid="stMarkdownContainer"] {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        """
+
+    st.markdown(
+        f"<style>{vars_css}{chrome_css}</style>",
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # STREAMLIT UI
 # ---------------------------------------------------------------------------
 
@@ -871,20 +1045,14 @@ st.set_page_config(
     layout="wide",
 )
 
-st.markdown(
-    """
-    <style>
-    div[data-testid="stExpander"] details div[data-testid="stMarkdownContainer"] {
-        max-height: 300px;
-        overflow-y: auto;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 if "clear_trigger" not in st.session_state:
     st.session_state.clear_trigger = 0
+if "dark_mode" not in st.session_state:
+    st.session_state.dark_mode = True
+
+# Inject theme CSS variables + Streamlit chrome overrides.
+# Must be called after session state is initialised and before any widget.
+_inject_theme_css(st.session_state.dark_mode)
 
 st.title("🔒 cXML Anonymizer Tool")
 st.markdown(
@@ -927,6 +1095,19 @@ with st.sidebar:
     st.header("🔄 Reset")
     if st.button("🗑️ Clear All Files", use_container_width=True):
         st.session_state.clear_trigger += 1
+        st.rerun()
+
+    st.divider()
+
+    st.header("🎨 Appearance")
+    new_dark = st.toggle(
+        "🌙 Dark Mode",
+        value=st.session_state.dark_mode,
+        key="dark_mode_toggle",
+        help="Switch between dark and light themes.",
+    )
+    if new_dark != st.session_state.dark_mode:
+        st.session_state.dark_mode = new_dark
         st.rerun()
 
     st.divider()
@@ -1017,7 +1198,7 @@ for i, uploaded_file in enumerate(uploaded_files):
             file_size = len(raw) / 1024
             st.markdown(
                 f"**📄 {safe_display_name}**  \n"
-                f"<span style='color:gray; font-size:0.85rem;'>"
+                f"<span style='color:var(--tc-text-secondary); font-size:0.85rem;'>"
                 f"Size: {file_size:.1f} KB</span>",
                 unsafe_allow_html=True,
             )
@@ -1028,7 +1209,7 @@ for i, uploaded_file in enumerate(uploaded_files):
                 safe_detected_by = _html.escape(detected_by)
                 st.markdown(
                     f"🌍 **{safe_region_label}**  \n"
-                    f"<span style='color:gray; font-size:0.85rem;'>"
+                    f"<span style='color:var(--tc-text-secondary); font-size:0.85rem;'>"
                     f"Detected via: {safe_detected_by}</span>",
                     unsafe_allow_html=True,
                 )
@@ -1040,13 +1221,13 @@ for i, uploaded_file in enumerate(uploaded_files):
                 safe_doc_type = _html.escape(doc_type or "")
                 st.markdown(
                     f"<div style='"
-                    f"background-color: #0e4429;"
-                    f"border: 1px solid #238636;"
+                    f"background-color: var(--tc-bg-valid);"
+                    f"border: 1px solid var(--tc-border-valid);"
                     f"border-radius: 6px;"
                     f"padding: 0.35rem 0.6rem;"
                     f"text-align: center;"
                     f"font-size: 0.85rem;"
-                    f"color: #3fb950;"
+                    f"color: var(--tc-text-valid);"
                     f"line-height: 1.3;"
                     f"margin-top: 0.25rem;"
                     f"'>✅ {safe_doc_type}</div>",
@@ -1055,13 +1236,13 @@ for i, uploaded_file in enumerate(uploaded_files):
             else:
                 st.markdown(
                     "<div style='"
-                    "background-color: #4a1a1a;"
-                    "border: 1px solid #d73a49;"
+                    "background-color: var(--tc-bg-invalid);"
+                    "border: 1px solid var(--tc-border-invalid);"
                     "border-radius: 6px;"
                     "padding: 0.35rem 0.6rem;"
                     "text-align: center;"
                     "font-size: 0.85rem;"
-                    "color: #f85149;"
+                    "color: var(--tc-text-invalid);"
                     "line-height: 1.3;"
                     "margin-top: 0.25rem;"
                     "'>❌ Invalid</div>",
@@ -1089,7 +1270,7 @@ for i, uploaded_file in enumerate(uploaded_files):
 if validation_errors:
     with st.expander("⚠️ Validation Errors — click to expand", expanded=True):
         error_html = "".join(
-            f"<p style='color:#faad14; margin:0.3rem 0;'>⚠️ {err}</p>"
+            f"<p style='color:var(--tc-text-warning); margin:0.3rem 0;'>⚠️ {err}</p>"
             for err in validation_errors
         )
         st.markdown(
@@ -1097,10 +1278,10 @@ if validation_errors:
             <div style="
                 max-height: 200px;
                 overflow-y: auto;
-                border: 1px solid #444;
+                border: 1px solid var(--tc-border);
                 border-radius: 6px;
                 padding: 0.75rem;
-                background-color: #1a1a2e;
+                background-color: var(--tc-bg-warning);
                 font-size: 0.9rem;
             ">
                 {error_html}
@@ -1258,6 +1439,6 @@ for filename, info in processing_logs.items():
 # --- Footer ---
 st.divider()
 st.markdown(
-    "<p style='text-align: center; color: gray;'>cXML Anonymizer Tool | Test Central Preparation</p>",
+    "<p style='text-align: center; color: var(--tc-text-secondary);'>cXML Anonymizer Tool | Test Central Preparation</p>",
     unsafe_allow_html=True,
 )
