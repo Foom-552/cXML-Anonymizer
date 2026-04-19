@@ -3,6 +3,7 @@ import io
 import html as _html
 import re
 import zipfile
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -282,6 +283,34 @@ MAX_TOTAL_BATCH_MB = 50
 
 
 # ---------------------------------------------------------------------------
+# DOCUMENT METADATA
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class DocumentMeta:
+    """Structured metadata about a validated cXML document."""
+
+    base_type: str
+    sub_type: str = "New"
+    order_version: str | None = None
+    has_document_reference: bool = False
+
+    @property
+    def display_label(self) -> str:
+        if self.base_type == "OrderRequest" and self.sub_type != "New":
+            return f"OrderRequest ({self.sub_type})"
+        return self.base_type
+
+    @property
+    def is_change_po(self) -> bool:
+        return self.base_type == "OrderRequest" and self.sub_type == "Change"
+
+    @property
+    def is_cancel_po(self) -> bool:
+        return self.base_type == "OrderRequest" and self.sub_type == "Cancel"
+
+
+# ---------------------------------------------------------------------------
 # HELPERS
 # ---------------------------------------------------------------------------
 
@@ -384,15 +413,44 @@ def detect_region(root: lxml_ET._Element) -> tuple[str, str]:
 # VALIDATION
 # ---------------------------------------------------------------------------
 
-def validate_cxml_file(xml_content: str) -> tuple[bool, str, str | None]:
+def _detect_order_request_subtype(request_el: lxml_ET._Element) -> DocumentMeta:
+    """Classify an OrderRequest as New, Change, or Cancel based on header attributes."""
+    orh = request_el.find(".//OrderRequestHeader")
+    if orh is None:
+        return DocumentMeta(base_type="OrderRequest")
+
+    po_type = orh.get("type", "new").lower()
+    order_version = orh.get("orderVersion", "1")
+    has_doc_ref = orh.find("DocumentReference") is not None
+
+    if po_type == "delete":
+        sub_type = "Cancel"
+    elif po_type == "update":
+        sub_type = "Change"
+    else:
+        try:
+            is_higher_version = int(order_version) > 1
+        except (ValueError, TypeError):
+            is_higher_version = False
+        sub_type = "Change" if is_higher_version else "New"
+
+    return DocumentMeta(
+        base_type="OrderRequest",
+        sub_type=sub_type,
+        order_version=order_version,
+        has_document_reference=has_doc_ref,
+    )
+
+
+def validate_cxml_file(xml_content: str) -> tuple[bool, str, DocumentMeta | None]:
     """Validate an uploaded file as a well-formed, structurally correct cXML document.
 
     Uses defusedxml as a security gate, then lxml (via the hardened parser) for
     structural inspection.
 
     Returns:
-        (is_valid, message, document_type)
-        document_type is None when is_valid is False.
+        (is_valid, message, document_meta)
+        document_meta is None when is_valid is False.
     """
     # FIX #3 — content sniff before any XML parsing
     if not _looks_like_xml(xml_content):
@@ -425,32 +483,32 @@ def validate_cxml_file(xml_content: str) -> tuple[bool, str, str | None]:
         return False, "Missing required <Header> element.", None
 
     # Detect document type from request body
-    document_type = "Unknown"
+    doc_meta = DocumentMeta(base_type="Unknown")
     request = root.find("Request")
     response = root.find("Response")
 
     if request is not None:
         if request.find(".//OrderRequest") is not None:
-            document_type = "OrderRequest"
+            doc_meta = _detect_order_request_subtype(request)
         elif request.find(".//ConfirmationRequest") is not None:
-            document_type = "OrderConfirmation"
+            doc_meta = DocumentMeta(base_type="OrderConfirmation")
         elif request.find(".//ShipNoticeRequest") is not None:
-            document_type = "ShipNotice"
+            doc_meta = DocumentMeta(base_type="ShipNotice")
         elif request.find(".//InvoiceDetailRequest") is not None:
-            document_type = "Invoice"
+            doc_meta = DocumentMeta(base_type="Invoice")
         else:
-            document_type = "Request (Other)"
+            doc_meta = DocumentMeta(base_type="Request (Other)")
     elif response is not None:
-        document_type = "Response"
+        doc_meta = DocumentMeta(base_type="Response")
 
-    return True, "Valid cXML document.", document_type
+    return True, "Valid cXML document.", doc_meta
 
 
 # ---------------------------------------------------------------------------
 # ANONYMIZATION
 # ---------------------------------------------------------------------------
 
-def apply_header_template(root: lxml_ET._Element) -> list[dict]:
+def apply_header_template(root: lxml_ET._Element, doc_meta: DocumentMeta | None = None) -> list[dict]:
     """Overwrite cXML envelope attributes and the Header / OrderRequestHeader
     with sanitised placeholder values.
 
@@ -532,13 +590,28 @@ def apply_header_template(root: lxml_ET._Element) -> list[dict]:
 
         orh = request_tag.find(".//OrderRequestHeader")
         if orh is not None:
-            for attr, new_val in [
+            preserve_po_attrs = (
+                doc_meta is not None
+                and doc_meta.base_type == "OrderRequest"
+                and doc_meta.sub_type in ("Change", "Cancel")
+            )
+
+            orh_replacements: list[tuple[str, str]] = [
                 ("orderDate", "#DATETIME#"),
                 ("orderID", "#DOCUMENTID#"),
                 ("orderType", "regular"),
-                ("orderVersion", "1"),
-                ("type", "new"),
-            ]:
+            ]
+
+            if preserve_po_attrs:
+                current_version = orh.get("orderVersion", "1")
+                current_type = orh.get("type", "new")
+                orh_replacements.append(("orderVersion", current_version))
+                orh_replacements.append(("type", current_type))
+            else:
+                orh_replacements.append(("orderVersion", "1"))
+                orh_replacements.append(("type", "new"))
+
+            for attr, new_val in orh_replacements:
                 old_val = orh.get(attr)
                 orh.set(attr, new_val)
                 if old_val is None:
@@ -552,6 +625,36 @@ def apply_header_template(root: lxml_ET._Element) -> list[dict]:
                         "field": f"<OrderRequestHeader {attr}>",
                         "original": old_val,
                         "anonymized": new_val,
+                    })
+
+            if preserve_po_attrs:
+                log.append({
+                    "field": "<OrderRequestHeader orderVersion>",
+                    "original": orh.get("orderVersion", "1"),
+                    "anonymized": f"(preserved — {doc_meta.sub_type} PO)",
+                })
+                log.append({
+                    "field": "<OrderRequestHeader type>",
+                    "original": orh.get("type", "new"),
+                    "anonymized": f"(preserved — {doc_meta.sub_type} PO)",
+                })
+
+            doc_ref = orh.find("DocumentReference")
+            if doc_ref is not None:
+                if preserve_po_attrs:
+                    old_ref_id = doc_ref.get("payloadID", "")
+                    doc_ref.set("payloadID", "#PREV_PAYLOADID#")
+                    log.append({
+                        "field": "<DocumentReference payloadID>",
+                        "original": old_ref_id or "(empty)",
+                        "anonymized": "#PREV_PAYLOADID#",
+                    })
+                else:
+                    orh.remove(doc_ref)
+                    log.append({
+                        "field": "<DocumentReference>",
+                        "original": "(element removed — unexpected on New PO)",
+                        "anonymized": "(removed)",
                     })
 
     return log
@@ -692,6 +795,7 @@ def process_cxml_content(
     xml_content: str,
     region_code: str | None = None,
     detection_method: str | None = None,
+    doc_meta: DocumentMeta | None = None,
 ) -> tuple[str, list[dict], str, str]:
     """Parse, anonymize and serialise a cXML document.
 
@@ -712,7 +816,7 @@ def process_cxml_content(
     active_profile: dict[str, str] = {**GENERIC_ANONYMIZATION_MAP, **REGIONAL_PROFILES[region_code]}
     active_profile.pop("display_name", None)
 
-    header_log = apply_header_template(root)
+    header_log = apply_header_template(root, doc_meta=doc_meta)
     element_log = anonymize_elements(root, active_profile)
     log = header_log + element_log
 
@@ -1092,6 +1196,24 @@ with st.sidebar:
     )
     st.divider()
 
+    st.header("📋 Document Types")
+    st.markdown(
+        """
+        | Type | Detection |
+        |------|-----------|
+        | **New PO** | `type="new"` (default) |
+        | **Change PO** | `type="update"` or `orderVersion` > 1 |
+        | **Cancel PO** | `type="delete"` |
+        | **Order Confirmation** | `<ConfirmationRequest>` |
+        | **Ship Notice** | `<ShipNoticeRequest>` |
+        | **Invoice** | `<InvoiceDetailRequest>` |
+
+        Change and Cancel POs preserve the original `orderVersion`,
+        `type`, and `<DocumentReference>` during anonymization.
+        """
+    )
+    st.divider()
+
     st.header("🔄 Reset")
     if st.button("🗑️ Clear All Files", use_container_width=True):
         st.session_state.clear_trigger += 1
@@ -1169,10 +1291,10 @@ for i, uploaded_file in enumerate(uploaded_files):
     try:
         file_content = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
-        is_valid, validation_message, doc_type = False, f"File is not valid UTF-8: {exc}", None
+        is_valid, validation_message, doc_meta = False, f"File is not valid UTF-8: {exc}", None
         file_content = ""
     else:
-        is_valid, validation_message, doc_type = validate_cxml_file(file_content)
+        is_valid, validation_message, doc_meta = validate_cxml_file(file_content)
 
     # FIX #6 — detect region once here and store it in file_configs so
     # process_cxml_content does not need to parse a third time per file.
@@ -1218,19 +1340,43 @@ for i, uploaded_file in enumerate(uploaded_files):
 
         with col3:
             if is_valid:
-                safe_doc_type = _html.escape(doc_type or "")
+                safe_doc_label = _html.escape(doc_meta.display_label if doc_meta else "")
+
+                if doc_meta and doc_meta.is_change_po:
+                    badge_bg = "var(--tc-bg-warning)"
+                    badge_border = "#d29922"
+                    badge_text_color = "var(--tc-text-warning)"
+                    badge_icon = "🔄"
+                elif doc_meta and doc_meta.is_cancel_po:
+                    badge_bg = "var(--tc-bg-invalid)"
+                    badge_border = "var(--tc-border-invalid)"
+                    badge_text_color = "var(--tc-text-invalid)"
+                    badge_icon = "🚫"
+                else:
+                    badge_bg = "var(--tc-bg-valid)"
+                    badge_border = "var(--tc-border-valid)"
+                    badge_text_color = "var(--tc-text-valid)"
+                    badge_icon = "✅"
+
+                detail_line = ""
+                if doc_meta and doc_meta.is_change_po and doc_meta.order_version:
+                    detail_line = (
+                        f"<br><span style='font-size:0.75rem;'>"
+                        f"v{_html.escape(doc_meta.order_version)}</span>"
+                    )
+
                 st.markdown(
                     f"<div style='"
-                    f"background-color: var(--tc-bg-valid);"
-                    f"border: 1px solid var(--tc-border-valid);"
+                    f"background-color: {badge_bg};"
+                    f"border: 1px solid {badge_border};"
                     f"border-radius: 6px;"
                     f"padding: 0.35rem 0.6rem;"
                     f"text-align: center;"
                     f"font-size: 0.85rem;"
-                    f"color: var(--tc-text-valid);"
+                    f"color: {badge_text_color};"
                     f"line-height: 1.3;"
                     f"margin-top: 0.25rem;"
-                    f"'>✅ {safe_doc_type}</div>",
+                    f"'>{badge_icon} {safe_doc_label}{detail_line}</div>",
                     unsafe_allow_html=True,
                 )
             else:
@@ -1258,7 +1404,7 @@ for i, uploaded_file in enumerate(uploaded_files):
         if is_valid:
             file_configs.append({
                 "file": uploaded_file,
-                "doc_type": doc_type,
+                "doc_meta": doc_meta,
                 # FIX #6 — carry pre-detected region through to avoid re-parsing
                 "region_code": detected_code,
                 "detection_method": detected_by,
@@ -1336,6 +1482,7 @@ for i, config in enumerate(file_configs):
             xml_content,
             region_code=config["region_code"],
             detection_method=config["detection_method"],
+            doc_meta=config["doc_meta"],
         )
         region_display = REGIONAL_PROFILES[region_code]["display_name"]
 
