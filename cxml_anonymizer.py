@@ -1,6 +1,20 @@
+"""cXML Anonymizer — Streamlit app for anonymizing cXML transactional documents.
+
+Sections (in order):
+  - Imports & security setup  — hardened lxml parser, defusedxml gate
+  - Configuration             — COUNTRY_PROFILES, anonymization maps, limits
+  - DocumentMeta              — frozen dataclass for document type/subtype
+  - Helpers                   — _stable_id, _sanitize_stem, _looks_like_xml
+  - Region detection          — detect_country(), _resolve_profile()
+  - Validation                — validate_cxml_file()
+  - Anonymization             — apply_header_template(), anonymize_elements(), process_cxml_content()
+  - UI rendering              — scrollable XML, summary tables, theme CSS
+  - Streamlit app             — file upload, processing, download, summary
+"""
 import hashlib
 import io
 import html as _html
+import logging
 import re
 import zipfile
 from dataclasses import dataclass
@@ -8,6 +22,8 @@ from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
+
+_log = logging.getLogger(__name__)
 
 # Use defusedxml to prevent XML bomb / entity expansion attacks (e.g. Billion Laughs).
 # pip install defusedxml lxml
@@ -542,13 +558,17 @@ _ORDER_TYPE_ATTRS: dict[str, dict[str, str | None]] = {
 # HELPERS
 # ---------------------------------------------------------------------------
 
+STABLE_ID_HEX_LENGTH = 12
+MAX_STEM_LENGTH = 64
+
+
 def _stable_id(value: str) -> str:
     """Return a short, stable, collision-resistant hex string for *value*.
 
     Used for CSS IDs and Streamlit widget keys.
     FIX #8 — replaces abs(hash(...)) which is non-deterministic across processes.
     """
-    return hashlib.sha1(value.encode()).hexdigest()[:12]
+    return hashlib.sha1(value.encode()).hexdigest()[:STABLE_ID_HEX_LENGTH]
 
 
 def _deduplicate_log(log: list[dict]) -> list[dict]:
@@ -567,7 +587,7 @@ def _deduplicate_log(log: list[dict]) -> list[dict]:
     return unique
 
 
-def _sanitize_stem(raw_name: str, max_len: int = 64) -> str:
+def _sanitize_stem(raw_name: str, max_len: int = MAX_STEM_LENGTH) -> str:
     """Return a filesystem-safe stem derived from *raw_name*.
 
     FIX #4 — prevents path-traversal sequences such as ../../etc/passwd
@@ -777,7 +797,7 @@ def apply_header_template(root: lxml_ET._Element, doc_meta: DocumentMeta | None 
 
     for attr, new_val in [
         ("payloadID", "#PAYLOADID#"),
-        ("timestamp", "2026-01-01T14:53:00-07:00"),
+        ("timestamp", "2026-01-01T14:53:00-07:00"),  # intentionally static — anonymized docs use a fixed date
         ("version", "1.2.069"),
     ]:
         old_val = root.get(attr)
@@ -1630,8 +1650,11 @@ for i, uploaded_file in enumerate(uploaded_files):
             detected_country, detected_region, detected_by = detect_country(root_preview)
             detected_profile = _resolve_profile(detected_country, detected_region)
             detected_display_label = detected_profile["display_name"]
-        except Exception:
-            pass  # keep defaults set above
+        except Exception as e:
+            st.warning(
+                f"Could not detect country for **{_html.escape(uploaded_file.name)}** "
+                f"— defaulting to {detected_display_label}. ({type(e).__name__}: {e})"
+            )
 
     with st.container():
         col1, col2, col3 = st.columns([2, 2, 1])
@@ -1836,6 +1859,7 @@ for i, config in enumerate(file_configs):
     except ValueError as e:
         errors.append(f"❌ **{_html.escape(file.name)}** — Validation error: {e}")
     except Exception as e:
+        _log.exception("Unexpected error processing %s", file.name)
         errors.append(f"❌ **{_html.escape(file.name)}** — {type(e).__name__}: {e}")
 
     progress_bar.progress((i + 1) / len(file_configs))
