@@ -293,6 +293,7 @@ class DocumentMeta:
     base_type: str
     sub_type: str = "New"
     order_version: str | None = None
+    order_type: str | None = None
     has_document_reference: bool = False
 
     @property
@@ -302,12 +303,33 @@ class DocumentMeta:
         return self.base_type
 
     @property
+    def order_type_label(self) -> str | None:
+        if self.order_type and self.order_type != "regular":
+            return self.order_type
+        return None
+
+    @property
     def is_change_po(self) -> bool:
         return self.base_type == "OrderRequest" and self.sub_type == "Change"
 
     @property
     def is_cancel_po(self) -> bool:
         return self.base_type == "OrderRequest" and self.sub_type == "Cancel"
+
+
+_ORDER_TYPE_ATTRS: dict[str, dict[str, str | None]] = {
+    "blanket": {
+        "releaseRequired": None,
+        "parentAgreementID": "#PARENT_AGREEMENTID#",
+        "parentAgreementPayloadID": "#PARENT_AGREEMENT_PAYLOADID#",
+        "effectiveDate": None,
+        "expirationDate": None,
+    },
+    "release": {
+        "agreementID": "#AGREEMENTID#",
+        "agreementPayloadID": "#AGREEMENT_PAYLOADID#",
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -414,13 +436,14 @@ def detect_region(root: lxml_ET._Element) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 def _detect_order_request_subtype(request_el: lxml_ET._Element) -> DocumentMeta:
-    """Classify an OrderRequest as New, Change, or Cancel based on header attributes."""
+    """Classify an OrderRequest based on header attributes (type, orderVersion, orderType)."""
     orh = request_el.find(".//OrderRequestHeader")
     if orh is None:
         return DocumentMeta(base_type="OrderRequest")
 
     po_type = orh.get("type", "new").lower()
     order_version = orh.get("orderVersion", "1")
+    order_type = orh.get("orderType", "regular")
     has_doc_ref = orh.find("DocumentReference") is not None
 
     if po_type == "delete":
@@ -438,6 +461,7 @@ def _detect_order_request_subtype(request_el: lxml_ET._Element) -> DocumentMeta:
         base_type="OrderRequest",
         sub_type=sub_type,
         order_version=order_version,
+        order_type=order_type,
         has_document_reference=has_doc_ref,
     )
 
@@ -596,10 +620,16 @@ def apply_header_template(root: lxml_ET._Element, doc_meta: DocumentMeta | None 
                 and doc_meta.sub_type in ("Change", "Cancel")
             )
 
+            current_order_type = (
+                doc_meta.order_type
+                if doc_meta is not None and doc_meta.order_type
+                else orh.get("orderType", "regular")
+            )
+
             orh_replacements: list[tuple[str, str]] = [
                 ("orderDate", "#DATETIME#"),
                 ("orderID", "#DOCUMENTID#"),
-                ("orderType", "regular"),
+                ("orderType", current_order_type),
             ]
 
             if preserve_po_attrs:
@@ -627,6 +657,13 @@ def apply_header_template(root: lxml_ET._Element, doc_meta: DocumentMeta | None 
                         "anonymized": new_val,
                     })
 
+            if current_order_type != "regular":
+                log.append({
+                    "field": "<OrderRequestHeader orderType>",
+                    "original": current_order_type,
+                    "anonymized": f"(preserved — {current_order_type})",
+                })
+
             if preserve_po_attrs:
                 log.append({
                     "field": "<OrderRequestHeader orderVersion>",
@@ -638,6 +675,25 @@ def apply_header_template(root: lxml_ET._Element, doc_meta: DocumentMeta | None 
                     "original": orh.get("type", "new"),
                     "anonymized": f"(preserved — {doc_meta.sub_type} PO)",
                 })
+
+            ot_attrs = _ORDER_TYPE_ATTRS.get(current_order_type, {})
+            for attr_name, anon_placeholder in ot_attrs.items():
+                old_val = orh.get(attr_name)
+                if old_val is None:
+                    continue
+                if anon_placeholder is not None:
+                    orh.set(attr_name, anon_placeholder)
+                    log.append({
+                        "field": f"<OrderRequestHeader {attr_name}>",
+                        "original": old_val,
+                        "anonymized": anon_placeholder,
+                    })
+                else:
+                    log.append({
+                        "field": f"<OrderRequestHeader {attr_name}>",
+                        "original": old_val,
+                        "anonymized": f"(preserved — {current_order_type})",
+                    })
 
             doc_ref = orh.find("DocumentReference")
             if doc_ref is not None:
@@ -751,6 +807,10 @@ def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> li
             })
 
         # --- Attribute substitution ---
+        # Skip OrderRequestHeader — its attributes are fully managed by apply_header_template
+        if local_tag == "OrderRequestHeader":
+            log.extend(anonymize_elements(child, profile))
+            continue
         for attr_name in list(child.attrib):
             local_attr = lxml_ET.QName(attr_name).localname
             # Never overwrite the Extrinsic name= attribute
@@ -1214,6 +1274,25 @@ with st.sidebar:
     )
     st.divider()
 
+    st.header("📦 Order Types")
+    st.markdown(
+        """
+        The `orderType` attribute is detected and preserved:
+
+        | Order Type | Related Attributes |
+        |------------|--------------------|
+        | **regular** | *(default — no extra attrs)* |
+        | **release** | `agreementID`, `agreementPayloadID` |
+        | **blanket** | `releaseRequired`, `parentAgreementID`, `parentAgreementPayloadID`, `effectiveDate`, `expirationDate` |
+        | **stockTransport** | *(no extra attrs)* |
+        | **stockTransportRelease** | *(no extra attrs)* |
+
+        ID/payload attributes are anonymized to placeholders;
+        flags and dates are preserved as-is.
+        """
+    )
+    st.divider()
+
     st.header("🔄 Reset")
     if st.button("🗑️ Clear All Files", use_container_width=True):
         st.session_state.clear_trigger += 1
@@ -1359,10 +1438,15 @@ for i, uploaded_file in enumerate(uploaded_files):
                     badge_icon = "✅"
 
                 detail_line = ""
+                detail_parts: list[str] = []
                 if doc_meta and doc_meta.is_change_po and doc_meta.order_version:
+                    detail_parts.append(f"v{_html.escape(doc_meta.order_version)}")
+                if doc_meta and doc_meta.order_type_label:
+                    detail_parts.append(_html.escape(doc_meta.order_type_label))
+                if detail_parts:
                     detail_line = (
                         f"<br><span style='font-size:0.75rem;'>"
-                        f"v{_html.escape(doc_meta.order_version)}</span>"
+                        f"{' | '.join(detail_parts)}</span>"
                     )
 
                 st.markdown(

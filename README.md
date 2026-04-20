@@ -43,6 +43,20 @@ When a Change or Cancel purchase order is detected, the anonymizer preserves the
 - **`type`** — kept as `"update"` or `"delete"` instead of being reset to `"new"`
 - **`<DocumentReference payloadID>`** — the element is preserved and the payload ID is anonymized to `#PREV_PAYLOADID#`
 
+### Order Types (`orderType`)
+
+The `orderType` attribute is detected and preserved for all purchase orders. Related attributes are handled per order type:
+
+| Order Type | Description | Related Attributes |
+|------------|-------------|--------------------|
+| `regular` | Standard purchase order (default) | — |
+| `release` | Release against a master agreement or blanket PO | `agreementID` (anonymized), `agreementPayloadID` (anonymized) |
+| `blanket` | Blanket purchase order | `releaseRequired` (preserved), `parentAgreementID` (anonymized), `parentAgreementPayloadID` (anonymized), `effectiveDate` (preserved), `expirationDate` (preserved) |
+| `stockTransport` | Stock transport order | — |
+| `stockTransportRelease` | Stock transport scheduling agreement release | — |
+
+ID and payload ID attributes are anonymized to placeholders (e.g. `#AGREEMENTID#`, `#PARENT_AGREEMENT_PAYLOADID#`). Flags (`releaseRequired`) and dates (`effectiveDate`, `expirationDate`) are preserved as-is.
+
 All other fields (names, addresses, identifiers, etc.) are still fully anonymized as normal.
 
 ---
@@ -79,6 +93,7 @@ Region is auto-detected from document signals in priority order: `isoCountryCode
 - System/classification codes listed in `PRESERVE_EXTRINSIC_NAMES`
 - Document type and format validity
 - Change/Cancel PO semantics (`orderVersion`, `type`, `<DocumentReference>`)
+- Order type (`orderType`) and related non-sensitive attributes (`releaseRequired`, `effectiveDate`, `expirationDate`)
 
 ---
 
