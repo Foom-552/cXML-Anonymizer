@@ -57,60 +57,210 @@ GENERIC_ANONYMIZATION_MAP: dict[str, str] = {
     "documentID": "ANONYMIZED_DOC_ID",
 }
 
-# Regional profiles supply locale-specific anonymized replacement values.
-REGIONAL_PROFILES: dict[str, dict[str, str]] = {
+# Per-country profiles supply locale-specific anonymized replacement values.
+# Each country maps to a region for grouping/display.  Countries without a
+# dedicated profile fall back to their region's default via REGION_DEFAULTS.
+COUNTRY_PROFILES: dict[str, dict[str, str]] = {
+    # ── APAC (default: AU) ──────────────────────────────────────────────
     "AU": {
-        "display_name": "Australia (AU)",
-        "City": "Anonymized City",
-        "State": "WA",
-        "PostalCode": "6000",
-        "Country": "Australia",
-        "isoCountryCode": "AU",
-        "Money": "1.00",
-        "currency": "AUD",
-        "Number": "0891234567",
+        "display_name": "Australia (APAC)", "region": "APAC",
+        "City": "Anonymized City", "State": "WA", "PostalCode": "6000",
+        "Country": "Australia", "isoCountryCode": "AU",
+        "Money": "1.00", "currency": "AUD", "Number": "0891234567",
     },
-    "NAMAR": {
-        "display_name": "North America (NAMAR)",
-        "City": "Anonymized City",
-        "State": "CA",
-        "PostalCode": "90210",
-        "Country": "United States",
-        "isoCountryCode": "US",
-        "Money": "1.00",
-        "currency": "USD",
-        "Number": "555-555-5555",
+    "NZ": {
+        "display_name": "New Zealand (APAC)", "region": "APAC",
+        "City": "Anonymized City", "State": "Auckland", "PostalCode": "1010",
+        "Country": "New Zealand", "isoCountryCode": "NZ",
+        "Money": "1.00", "currency": "NZD", "Number": "093012345",
     },
-    "EMEA": {
-        "display_name": "Europe, Middle East & Africa (EMEA)",
-        "City": "Anonymized City",
-        "State": "BE",
-        "PostalCode": "10115",
-        "Country": "Germany",
-        "isoCountryCode": "DE",
-        "Money": "1.00",
-        "currency": "EUR",
-        "Number": "03012345678",
+    "IN": {
+        "display_name": "India (APAC)", "region": "APAC",
+        "City": "Anonymized City", "State": "Maharashtra", "PostalCode": "400001",
+        "Country": "India", "isoCountryCode": "IN",
+        "Money": "1.00", "currency": "INR", "Number": "02212345678",
     },
-    "Japan": {
-        "display_name": "Japan (JP)",
-        "City": "Chiyoda",
-        "State": "Tokyo",
-        "PostalCode": "100-0001",
-        "Country": "Japan",
-        "isoCountryCode": "JP",
-        "Money": "1.00",
-        "currency": "JPY",
-        "Number": "0312345678",
+    "CN": {
+        "display_name": "China (APAC)", "region": "APAC",
+        "City": "Anonymized City", "State": "Shanghai", "PostalCode": "200000",
+        "Country": "China", "isoCountryCode": "CN",
+        "Money": "1.00", "currency": "CNY", "Number": "02112345678",
+    },
+    "SG": {
+        "display_name": "Singapore (APAC)", "region": "APAC",
+        "City": "Anonymized City", "State": "SG", "PostalCode": "018956",
+        "Country": "Singapore", "isoCountryCode": "SG",
+        "Money": "1.00", "currency": "SGD", "Number": "61234567",
+    },
+    "KR": {
+        "display_name": "South Korea (APAC)", "region": "APAC",
+        "City": "Anonymized City", "State": "Seoul", "PostalCode": "04524",
+        "Country": "Korea, Republic of", "isoCountryCode": "KR",
+        "Money": "1.00", "currency": "KRW", "Number": "0212345678",
+    },
+    "TH": {
+        "display_name": "Thailand (APAC)", "region": "APAC",
+        "City": "Anonymized City", "State": "Bangkok", "PostalCode": "10110",
+        "Country": "Thailand", "isoCountryCode": "TH",
+        "Money": "1.00", "currency": "THB", "Number": "021234567",
+    },
+    "ID": {
+        "display_name": "Indonesia (APAC)", "region": "APAC",
+        "City": "Anonymized City", "State": "Jakarta", "PostalCode": "10110",
+        "Country": "Indonesia", "isoCountryCode": "ID",
+        "Money": "1.00", "currency": "IDR", "Number": "02112345678",
+    },
+    "PH": {
+        "display_name": "Philippines (APAC)", "region": "APAC",
+        "City": "Anonymized City", "State": "Metro Manila", "PostalCode": "1000",
+        "Country": "Philippines", "isoCountryCode": "PH",
+        "Money": "1.00", "currency": "PHP", "Number": "0281234567",
+    },
+    "MY": {
+        "display_name": "Malaysia (APAC)", "region": "APAC",
+        "City": "Anonymized City", "State": "Kuala Lumpur", "PostalCode": "50450",
+        "Country": "Malaysia", "isoCountryCode": "MY",
+        "Money": "1.00", "currency": "MYR", "Number": "0312345678",
+    },
+    # ── NAMAR (default: US) ─────────────────────────────────────────────
+    "US": {
+        "display_name": "United States (NAMAR)", "region": "NAMAR",
+        "City": "Anonymized City", "State": "CA", "PostalCode": "90210",
+        "Country": "United States", "isoCountryCode": "US",
+        "Money": "1.00", "currency": "USD", "Number": "555-555-5555",
+    },
+    "CA": {
+        "display_name": "Canada (NAMAR)", "region": "NAMAR",
+        "City": "Anonymized City", "State": "ON", "PostalCode": "M5H 2N2",
+        "Country": "Canada", "isoCountryCode": "CA",
+        "Money": "1.00", "currency": "CAD", "Number": "416-555-5555",
+    },
+    "MX": {
+        "display_name": "Mexico (NAMAR)", "region": "NAMAR",
+        "City": "Anonymized City", "State": "CDMX", "PostalCode": "06600",
+        "Country": "Mexico", "isoCountryCode": "MX",
+        "Money": "1.00", "currency": "MXN", "Number": "5512345678",
+    },
+    # ── EMEA (default: DE) ──────────────────────────────────────────────
+    "DE": {
+        "display_name": "Germany (EMEA)", "region": "EMEA",
+        "City": "Anonymized City", "State": "BE", "PostalCode": "10115",
+        "Country": "Germany", "isoCountryCode": "DE",
+        "Money": "1.00", "currency": "EUR", "Number": "03012345678",
+    },
+    "GB": {
+        "display_name": "United Kingdom (EMEA)", "region": "EMEA",
+        "City": "Anonymized City", "State": "London", "PostalCode": "SW1A 1AA",
+        "Country": "United Kingdom", "isoCountryCode": "GB",
+        "Money": "1.00", "currency": "GBP", "Number": "02012345678",
+    },
+    "FR": {
+        "display_name": "France (EMEA)", "region": "EMEA",
+        "City": "Anonymized City", "State": "IDF", "PostalCode": "75001",
+        "Country": "France", "isoCountryCode": "FR",
+        "Money": "1.00", "currency": "EUR", "Number": "0112345678",
+    },
+    "NL": {
+        "display_name": "Netherlands (EMEA)", "region": "EMEA",
+        "City": "Anonymized City", "State": "NH", "PostalCode": "1012 AB",
+        "Country": "Netherlands", "isoCountryCode": "NL",
+        "Money": "1.00", "currency": "EUR", "Number": "0201234567",
+    },
+    "CH": {
+        "display_name": "Switzerland (EMEA)", "region": "EMEA",
+        "City": "Anonymized City", "State": "ZH", "PostalCode": "8001",
+        "Country": "Switzerland", "isoCountryCode": "CH",
+        "Money": "1.00", "currency": "CHF", "Number": "0441234567",
+    },
+    "SE": {
+        "display_name": "Sweden (EMEA)", "region": "EMEA",
+        "City": "Anonymized City", "State": "Stockholm", "PostalCode": "111 22",
+        "Country": "Sweden", "isoCountryCode": "SE",
+        "Money": "1.00", "currency": "SEK", "Number": "081234567",
+    },
+    "AE": {
+        "display_name": "UAE (EMEA)", "region": "EMEA",
+        "City": "Anonymized City", "State": "Dubai", "PostalCode": "00000",
+        "Country": "United Arab Emirates", "isoCountryCode": "AE",
+        "Money": "1.00", "currency": "AED", "Number": "041234567",
+    },
+    "SA": {
+        "display_name": "Saudi Arabia (EMEA)", "region": "EMEA",
+        "City": "Anonymized City", "State": "Riyadh", "PostalCode": "11564",
+        "Country": "Saudi Arabia", "isoCountryCode": "SA",
+        "Money": "1.00", "currency": "SAR", "Number": "0112345678",
+    },
+    "ZA": {
+        "display_name": "South Africa (EMEA)", "region": "EMEA",
+        "City": "Anonymized City", "State": "Gauteng", "PostalCode": "2000",
+        "Country": "South Africa", "isoCountryCode": "ZA",
+        "Money": "1.00", "currency": "ZAR", "Number": "0111234567",
+    },
+    "IL": {
+        "display_name": "Israel (EMEA)", "region": "EMEA",
+        "City": "Anonymized City", "State": "Tel Aviv", "PostalCode": "6100000",
+        "Country": "Israel", "isoCountryCode": "IL",
+        "Money": "1.00", "currency": "ILS", "Number": "031234567",
+    },
+    "TR": {
+        "display_name": "Turkey (EMEA)", "region": "EMEA",
+        "City": "Anonymized City", "State": "Istanbul", "PostalCode": "34000",
+        "Country": "Turkey", "isoCountryCode": "TR",
+        "Money": "1.00", "currency": "TRY", "Number": "02121234567",
+    },
+    # ── Japan (default: JP) ─────────────────────────────────────────────
+    "JP": {
+        "display_name": "Japan", "region": "Japan",
+        "City": "Chiyoda", "State": "Tokyo", "PostalCode": "100-0001",
+        "Country": "Japan", "isoCountryCode": "JP",
+        "Money": "1.00", "currency": "JPY", "Number": "0312345678",
+    },
+    # ── LATAM (default: BR) ─────────────────────────────────────────────
+    "BR": {
+        "display_name": "Brazil (LATAM)", "region": "LATAM",
+        "City": "Anonymized City", "State": "SP", "PostalCode": "01000-000",
+        "Country": "Brazil", "isoCountryCode": "BR",
+        "Money": "1.00", "currency": "BRL", "Number": "1112345678",
+    },
+    "AR": {
+        "display_name": "Argentina (LATAM)", "region": "LATAM",
+        "City": "Anonymized City", "State": "BA", "PostalCode": "C1001",
+        "Country": "Argentina", "isoCountryCode": "AR",
+        "Money": "1.00", "currency": "ARS", "Number": "1112345678",
+    },
+    "CO": {
+        "display_name": "Colombia (LATAM)", "region": "LATAM",
+        "City": "Anonymized City", "State": "Bogota", "PostalCode": "110111",
+        "Country": "Colombia", "isoCountryCode": "CO",
+        "Money": "1.00", "currency": "COP", "Number": "6011234567",
+    },
+    "CL": {
+        "display_name": "Chile (LATAM)", "region": "LATAM",
+        "City": "Anonymized City", "State": "RM", "PostalCode": "8320000",
+        "Country": "Chile", "isoCountryCode": "CL",
+        "Money": "1.00", "currency": "CLP", "Number": "221234567",
     },
 }
 
+REGION_DEFAULTS: dict[str, str] = {
+    "APAC": "AU",
+    "NAMAR": "US",
+    "EMEA": "DE",
+    "Japan": "JP",
+    "LATAM": "BR",
+}
+
+DEFAULT_REGION = "APAC"
+
 # ISO 3166-1 alpha-2 country codes -> region key.
 ISO_COUNTRY_TO_REGION: dict[str, str] = {
-    # Australia / Pacific
-    "AU": "AU", "NZ": "AU",
+    # APAC
+    "AU": "APAC", "NZ": "APAC", "IN": "APAC", "CN": "APAC", "SG": "APAC",
+    "KR": "APAC", "TH": "APAC", "ID": "APAC", "PH": "APAC", "VN": "APAC",
+    "MY": "APAC", "TW": "APAC", "HK": "APAC", "BD": "APAC", "LK": "APAC",
+    "MM": "APAC", "KH": "APAC", "NP": "APAC",
     # North America
-    "US": "NAMAR", "CA": "NAMAR", "MX": "NAMAR",
+    "US": "NAMAR", "CA": "NAMAR",
     # Japan
     "JP": "Japan",
     # EMEA - Europe
@@ -128,34 +278,90 @@ ISO_COUNTRY_TO_REGION: dict[str, str] = {
     # EMEA - Africa
     "ZA": "EMEA", "NG": "EMEA", "EG": "EMEA", "KE": "EMEA", "GH": "EMEA",
     "TZ": "EMEA", "MA": "EMEA", "DZ": "EMEA", "TN": "EMEA",
+    # LATAM
+    "MX": "LATAM", "BR": "LATAM", "AR": "LATAM", "CO": "LATAM", "CL": "LATAM",
+    "PE": "LATAM", "EC": "LATAM", "VE": "LATAM", "UY": "LATAM", "PY": "LATAM",
+    "BO": "LATAM", "CR": "LATAM", "PA": "LATAM", "DO": "LATAM", "GT": "LATAM",
+    "HN": "LATAM", "SV": "LATAM", "NI": "LATAM", "CU": "LATAM", "PR": "LATAM",
+    "TT": "LATAM",
 }
 
-# Currency codes -> region key (fallback when no country code is present).
-CURRENCY_TO_REGION: dict[str, str] = {
-    "AUD": "AU", "NZD": "AU",
-    "USD": "NAMAR", "CAD": "NAMAR", "MXN": "NAMAR",
-    "JPY": "Japan",
-    "EUR": "EMEA", "GBP": "EMEA", "CHF": "EMEA", "SEK": "EMEA",
-    "NOK": "EMEA", "DKK": "EMEA", "PLN": "EMEA", "CZK": "EMEA",
-    "HUF": "EMEA", "RON": "EMEA", "ZAR": "EMEA", "AED": "EMEA",
-    "SAR": "EMEA", "TRY": "EMEA", "ILS": "EMEA", "QAR": "EMEA",
+# Currency code -> (region, country) for direct per-country resolution.
+CURRENCY_TO_COUNTRY: dict[str, tuple[str, str]] = {
+    # APAC
+    "AUD": ("APAC", "AU"), "NZD": ("APAC", "NZ"), "INR": ("APAC", "IN"),
+    "CNY": ("APAC", "CN"), "SGD": ("APAC", "SG"), "KRW": ("APAC", "KR"),
+    "THB": ("APAC", "TH"), "IDR": ("APAC", "ID"), "PHP": ("APAC", "PH"),
+    "VND": ("APAC", "VN"), "MYR": ("APAC", "MY"), "TWD": ("APAC", "TW"),
+    "HKD": ("APAC", "HK"), "BDT": ("APAC", "BD"), "LKR": ("APAC", "LK"),
+    # NAMAR
+    "USD": ("NAMAR", "US"), "CAD": ("NAMAR", "CA"),
+    # Japan
+    "JPY": ("Japan", "JP"),
+    # EMEA
+    "EUR": ("EMEA", "DE"), "GBP": ("EMEA", "GB"), "CHF": ("EMEA", "CH"),
+    "SEK": ("EMEA", "SE"), "NOK": ("EMEA", "NO"), "DKK": ("EMEA", "DK"),
+    "PLN": ("EMEA", "PL"), "CZK": ("EMEA", "CZ"), "HUF": ("EMEA", "HU"),
+    "RON": ("EMEA", "RO"), "ZAR": ("EMEA", "ZA"), "AED": ("EMEA", "AE"),
+    "SAR": ("EMEA", "SA"), "TRY": ("EMEA", "TR"), "ILS": ("EMEA", "IL"),
+    "QAR": ("EMEA", "QA"), "BGN": ("EMEA", "BG"), "HRK": ("EMEA", "HR"),
+    "RSD": ("EMEA", "RS"), "ISK": ("EMEA", "IS"), "EGP": ("EMEA", "EG"),
+    "NGN": ("EMEA", "NG"), "KES": ("EMEA", "KE"), "MAD": ("EMEA", "MA"),
+    "TND": ("EMEA", "TN"), "KWD": ("EMEA", "KW"), "BHD": ("EMEA", "BH"),
+    "OMR": ("EMEA", "OM"), "JOD": ("EMEA", "JO"), "PKR": ("EMEA", "PK"),
+    # LATAM
+    "MXN": ("LATAM", "MX"), "BRL": ("LATAM", "BR"), "ARS": ("LATAM", "AR"),
+    "COP": ("LATAM", "CO"), "CLP": ("LATAM", "CL"), "PEN": ("LATAM", "PE"),
+    "UYU": ("LATAM", "UY"),
 }
 
-# FIX #11 — moved out of detect_region() so it is not rebuilt on every call.
-COUNTRY_NAME_TO_REGION: dict[str, str] = {
-    "australia": "AU", "new zealand": "AU",
-    "united states": "NAMAR", "usa": "NAMAR", "canada": "NAMAR", "mexico": "NAMAR",
-    "japan": "Japan",
-    "germany": "EMEA", "france": "EMEA", "united kingdom": "EMEA",
-    "uk": "EMEA", "england": "EMEA", "netherlands": "EMEA",
-    "spain": "EMEA", "italy": "EMEA", "sweden": "EMEA", "norway": "EMEA",
-    "denmark": "EMEA", "finland": "EMEA", "switzerland": "EMEA",
-    "austria": "EMEA", "belgium": "EMEA", "ireland": "EMEA",
-    "south africa": "EMEA", "united arab emirates": "EMEA", "uae": "EMEA",
-    "saudi arabia": "EMEA",
+# FIX #11 — module-level constant so it is not rebuilt on every call.
+COUNTRY_NAME_TO_COUNTRY: dict[str, tuple[str, str]] = {
+    # APAC
+    "australia": ("APAC", "AU"), "new zealand": ("APAC", "NZ"),
+    "india": ("APAC", "IN"), "china": ("APAC", "CN"),
+    "singapore": ("APAC", "SG"), "south korea": ("APAC", "KR"),
+    "korea": ("APAC", "KR"), "thailand": ("APAC", "TH"),
+    "indonesia": ("APAC", "ID"), "philippines": ("APAC", "PH"),
+    "vietnam": ("APAC", "VN"), "malaysia": ("APAC", "MY"),
+    "taiwan": ("APAC", "TW"), "hong kong": ("APAC", "HK"),
+    "bangladesh": ("APAC", "BD"), "sri lanka": ("APAC", "LK"),
+    # NAMAR
+    "united states": ("NAMAR", "US"), "usa": ("NAMAR", "US"),
+    "canada": ("NAMAR", "CA"),
+    # Japan
+    "japan": ("Japan", "JP"),
+    # EMEA
+    "germany": ("EMEA", "DE"), "france": ("EMEA", "FR"),
+    "united kingdom": ("EMEA", "GB"), "uk": ("EMEA", "GB"),
+    "england": ("EMEA", "GB"), "netherlands": ("EMEA", "NL"),
+    "spain": ("EMEA", "ES"), "italy": ("EMEA", "IT"),
+    "sweden": ("EMEA", "SE"), "norway": ("EMEA", "NO"),
+    "denmark": ("EMEA", "DK"), "finland": ("EMEA", "FI"),
+    "switzerland": ("EMEA", "CH"), "austria": ("EMEA", "AT"),
+    "belgium": ("EMEA", "BE"), "ireland": ("EMEA", "IE"),
+    "portugal": ("EMEA", "PT"), "poland": ("EMEA", "PL"),
+    "hungary": ("EMEA", "HU"), "romania": ("EMEA", "RO"),
+    "greece": ("EMEA", "GR"), "czech republic": ("EMEA", "CZ"),
+    "czechia": ("EMEA", "CZ"), "croatia": ("EMEA", "HR"),
+    "bulgaria": ("EMEA", "BG"), "serbia": ("EMEA", "RS"),
+    "slovenia": ("EMEA", "SI"), "luxembourg": ("EMEA", "LU"),
+    "iceland": ("EMEA", "IS"), "israel": ("EMEA", "IL"),
+    "turkey": ("EMEA", "TR"), "south africa": ("EMEA", "ZA"),
+    "united arab emirates": ("EMEA", "AE"), "uae": ("EMEA", "AE"),
+    "saudi arabia": ("EMEA", "SA"), "egypt": ("EMEA", "EG"),
+    "nigeria": ("EMEA", "NG"), "kenya": ("EMEA", "KE"),
+    "qatar": ("EMEA", "QA"), "kuwait": ("EMEA", "KW"),
+    "pakistan": ("EMEA", "PK"), "morocco": ("EMEA", "MA"),
+    # LATAM
+    "mexico": ("LATAM", "MX"), "brazil": ("LATAM", "BR"),
+    "brasil": ("LATAM", "BR"), "argentina": ("LATAM", "AR"),
+    "colombia": ("LATAM", "CO"), "chile": ("LATAM", "CL"),
+    "peru": ("LATAM", "PE"), "ecuador": ("LATAM", "EC"),
+    "venezuela": ("LATAM", "VE"), "uruguay": ("LATAM", "UY"),
+    "paraguay": ("LATAM", "PY"), "bolivia": ("LATAM", "BO"),
+    "costa rica": ("LATAM", "CR"), "panama": ("LATAM", "PA"),
 }
-
-DEFAULT_REGION = "AU"
 
 SENSITIVE_ATTR_NAMES: set[str] = {"name", "email", "phone", "contact", "firstName", "lastName"}
 
@@ -386,19 +592,26 @@ def _looks_like_xml(content: str) -> bool:
 # REGION DETECTION
 # ---------------------------------------------------------------------------
 
-def detect_region(root: lxml_ET._Element) -> tuple[str, str]:
-    """Automatically detect the region from signals within the parsed cXML tree.
+def _resolve_profile(country_code: str, region: str) -> dict[str, str]:
+    """Return the country profile for *country_code*, falling back to the region default."""
+    if country_code in COUNTRY_PROFILES:
+        return COUNTRY_PROFILES[country_code]
+    default_country = REGION_DEFAULTS.get(region, REGION_DEFAULTS[DEFAULT_REGION])
+    return COUNTRY_PROFILES[default_country]
 
-    Detection priority (first match wins):
-      1. ``isoCountryCode`` attribute on any ``<Country>`` element.
+
+def detect_country(root: lxml_ET._Element) -> tuple[str, str, str]:
+    """Detect country and region from signals within the parsed cXML tree.
+
+    Detection priority:
+      1. ``isoCountryCode`` attribute — majority-vote across all ``<Country>`` elements.
       2. ``currency`` attribute on any ``<Money>`` element.
       3. Text content of ``<Country>`` elements matched case-insensitively.
-      4. Falls back to DEFAULT_REGION ("AU") if nothing is found.
+      4. Falls back to DEFAULT_REGION / AU.
 
     Returns:
-        (region_code, detection_method_description)
+        (country_code, region, detection_method_description)
     """
-    # Single pass — collect Country and Money elements to avoid three full tree scans.
     country_els: list[lxml_ET._Element] = []
     money_els: list[lxml_ET._Element] = []
     for el in root.iter():
@@ -408,27 +621,49 @@ def detect_region(root: lxml_ET._Element) -> tuple[str, str]:
         elif local == "Money":
             money_els.append(el)
 
-    # 1. isoCountryCode attribute
+    # 1. isoCountryCode — majority-vote across all Country elements
+    code_counts: dict[str, int] = {}
+    unmapped_codes: list[str] = []
     for el in country_els:
         code = el.get("isoCountryCode", "").upper()
+        if not code:
+            continue
         if code in ISO_COUNTRY_TO_REGION:
-            return ISO_COUNTRY_TO_REGION[code], f"isoCountryCode='{code}'"
+            code_counts[code] = code_counts.get(code, 0) + 1
+        else:
+            unmapped_codes.append(code)
+
+    if code_counts:
+        winner = max(code_counts, key=code_counts.get)
+        region = ISO_COUNTRY_TO_REGION[winner]
+        method = f"isoCountryCode='{winner}'"
+        if len(code_counts) > 1:
+            method += f" (majority of {sum(code_counts.values())})"
+        if unmapped_codes:
+            method += f" [unmapped: {', '.join(sorted(set(unmapped_codes)))}]"
+        return winner, region, method
 
     # 2. currency attribute on <Money>
     for el in money_els:
         currency = el.get("currency", "").upper()
-        if currency in CURRENCY_TO_REGION:
-            return CURRENCY_TO_REGION[currency], f"currency='{currency}'"
+        if currency in CURRENCY_TO_COUNTRY:
+            region, country = CURRENCY_TO_COUNTRY[currency]
+            return country, region, f"currency='{currency}'"
 
-    # 3. Country text content  (FIX #11 — map is now a module-level constant)
+    # 3. Country text content
     for el in country_els:
         if el.text:
             name = el.text.strip().lower()
-            if name in COUNTRY_NAME_TO_REGION:
-                return COUNTRY_NAME_TO_REGION[name], f"country name='{el.text.strip()}'"
+            if name in COUNTRY_NAME_TO_COUNTRY:
+                region, country = COUNTRY_NAME_TO_COUNTRY[name]
+                return country, region, f"country name='{el.text.strip()}'"
 
     # 4. Default fallback
-    return DEFAULT_REGION, "fallback default"
+    fallback_method = "fallback default"
+    if unmapped_codes:
+        fallback_method += f" [unmapped isoCountryCode: {', '.join(sorted(set(unmapped_codes)))}]"
+    default_country = REGION_DEFAULTS[DEFAULT_REGION]
+    return default_country, DEFAULT_REGION, fallback_method
 
 
 # ---------------------------------------------------------------------------
@@ -853,28 +1088,30 @@ def _insert_doctype(xml_string: str) -> str:
 
 def process_cxml_content(
     xml_content: str,
+    country_code: str | None = None,
     region_code: str | None = None,
     detection_method: str | None = None,
     doc_meta: DocumentMeta | None = None,
-) -> tuple[str, list[dict], str, str]:
+) -> tuple[str, list[dict], str, str, str]:
     """Parse, anonymize and serialise a cXML document.
 
-    FIX #6 — accepts a pre-detected (region_code, detection_method) pair so the
-    caller can pass in the result already computed during the upload display loop,
-    avoiding a redundant third lxml parse per file.  When both are None the
-    region is auto-detected here as before.
+    FIX #6 — accepts pre-detected (country_code, region_code, detection_method)
+    so the caller can pass in results already computed during the upload display
+    loop, avoiding a redundant third lxml parse per file.
 
     Returns:
-        (anonymized_xml_string, substitution_log, region_code, detection_method)
+        (anonymized_xml_string, substitution_log, country_code, region_code, detection_method)
     """
     # FIX #1 — use the hardened parser everywhere lxml touches user content
     root: lxml_ET._Element = lxml_ET.fromstring(xml_content.encode(), parser=_SAFE_PARSER)
 
-    if region_code is None or detection_method is None:
-        region_code, detection_method = detect_region(root)
+    if country_code is None or region_code is None or detection_method is None:
+        country_code, region_code, detection_method = detect_country(root)
 
-    active_profile: dict[str, str] = {**GENERIC_ANONYMIZATION_MAP, **REGIONAL_PROFILES[region_code]}
+    profile = _resolve_profile(country_code, region_code)
+    active_profile: dict[str, str] = {**GENERIC_ANONYMIZATION_MAP, **profile}
     active_profile.pop("display_name", None)
+    active_profile.pop("region", None)
 
     header_log = apply_header_template(root, doc_meta=doc_meta)
     element_log = anonymize_elements(root, active_profile)
@@ -888,7 +1125,7 @@ def process_cxml_content(
     )
     output_string = _insert_doctype(output_bytes.decode("utf-8"))
 
-    return output_string, log, region_code, detection_method
+    return output_string, log, country_code, region_code, detection_method
 
 
 def create_zip_file(files_dict: dict[str, str]) -> io.BytesIO:
@@ -1239,19 +1476,23 @@ with st.sidebar:
     )
     st.divider()
 
-    st.header("🌍 Auto Region Detection")
+    st.header("🌍 Auto Country & Region Detection")
     st.markdown(
         """
-        The region is detected automatically from each document using
-        the following signals (in priority order):
+        Country and region are detected automatically using
+        (in priority order):
 
-        1. `isoCountryCode` attribute on `<Country>` elements
-        2. `currency` attribute on `<Money>` elements
+        1. `isoCountryCode` on `<Country>` elements (majority-vote)
+        2. `currency` on `<Money>` elements
         3. `<Country>` text content
 
-        Detected region determines which anonymized locale values
-        (postal code, currency, phone format, etc.) are applied.
-        Falls back to **Australia (AU)** if no signal is found.
+        **Regions:** APAC, NAMAR, EMEA, Japan, LATAM
+
+        Each detected country gets locale-accurate anonymized values
+        (postal code, currency, phone format). Countries without a
+        dedicated profile fall back to their region default.
+
+        Falls back to **Australia (APAC)** if no signal is found.
         """
     )
     st.divider()
@@ -1375,17 +1616,20 @@ for i, uploaded_file in enumerate(uploaded_files):
     else:
         is_valid, validation_message, doc_meta = validate_cxml_file(file_content)
 
-    # FIX #6 — detect region once here and store it in file_configs so
+    # FIX #6 — detect country once here and store it in file_configs so
     # process_cxml_content does not need to parse a third time per file.
-    detected_code = DEFAULT_REGION
+    detected_country = REGION_DEFAULTS[DEFAULT_REGION]
+    detected_region = DEFAULT_REGION
     detected_by = "fallback default"
-    detected_region_label = REGIONAL_PROFILES[DEFAULT_REGION]["display_name"]
+    detected_profile = _resolve_profile(detected_country, detected_region)
+    detected_display_label = detected_profile["display_name"]
 
     if is_valid:
         try:
             root_preview = lxml_ET.fromstring(file_content.encode(), parser=_SAFE_PARSER)
-            detected_code, detected_by = detect_region(root_preview)
-            detected_region_label = REGIONAL_PROFILES[detected_code]["display_name"]
+            detected_country, detected_region, detected_by = detect_country(root_preview)
+            detected_profile = _resolve_profile(detected_country, detected_region)
+            detected_display_label = detected_profile["display_name"]
         except Exception:
             pass  # keep defaults set above
 
@@ -1406,7 +1650,7 @@ for i, uploaded_file in enumerate(uploaded_files):
 
         with col2:
             if is_valid:
-                safe_region_label = _html.escape(detected_region_label)
+                safe_region_label = _html.escape(detected_display_label)
                 safe_detected_by = _html.escape(detected_by)
                 st.markdown(
                     f"🌍 **{safe_region_label}**  \n"
@@ -1489,8 +1733,9 @@ for i, uploaded_file in enumerate(uploaded_files):
             file_configs.append({
                 "file": uploaded_file,
                 "doc_meta": doc_meta,
-                # FIX #6 — carry pre-detected region through to avoid re-parsing
-                "region_code": detected_code,
+                # FIX #6 — carry pre-detected country/region through to avoid re-parsing
+                "country_code": detected_country,
+                "region_code": detected_region,
                 "detection_method": detected_by,
                 "xml_content": file_content,
             })
@@ -1561,14 +1806,16 @@ for i, config in enumerate(file_configs):
     try:
         xml_content = config["xml_content"]
 
-        # FIX #6 — pass pre-detected region so process_cxml_content skips re-detection
-        anonymized_content, log, region_code, detection_method = process_cxml_content(
+        # FIX #6 — pass pre-detected country/region so process_cxml_content skips re-detection
+        anonymized_content, log, country_code, region_code, detection_method = process_cxml_content(
             xml_content,
+            country_code=config["country_code"],
             region_code=config["region_code"],
             detection_method=config["detection_method"],
             doc_meta=config["doc_meta"],
         )
-        region_display = REGIONAL_PROFILES[region_code]["display_name"]
+        profile = _resolve_profile(country_code, region_code)
+        region_display = profile["display_name"]
 
         # FIX #4 — sanitize stem to prevent path traversal in output filenames
         safe_stem = _sanitize_stem(file.name)
@@ -1582,6 +1829,7 @@ for i, config in enumerate(file_configs):
             "log": log,
             "region": region_display,
             "detection_method": detection_method,
+            "doc_meta": config["doc_meta"],
             "processed_at": datetime.now().isoformat(timespec="seconds"),
             "dry_run": dry_run,
         }
@@ -1631,7 +1879,7 @@ if not dry_run and anonymized_files:
         safe_filename = _html.escape(filename)   # FIX #2
         col1, col2 = st.columns([3, 1])
         with col1:
-            with st.expander(f"👁️ Preview: {safe_filename}"):
+            with st.expander(f"👁️ Preview anonymized — {safe_filename}"):
                 _render_scrollable_xml(content, height_px=1000)
         with col2:
             st.download_button(
@@ -1645,7 +1893,7 @@ if not dry_run and anonymized_files:
 # --- Processing summary ---
 st.divider()
 st.subheader("📋 Processing Summary")
-st.caption("Auto-detected region, timestamp, and every field substitution with original and anonymized values.")
+st.caption("Auto-detected country/region, document type, timestamp, and every field substitution.")
 
 for filename, info in processing_logs.items():
     log = info["log"]
@@ -1653,6 +1901,7 @@ for filename, info in processing_logs.items():
     detection_method = info["detection_method"]
     processed_at = info["processed_at"]
     is_dry_run = info["dry_run"]
+    meta = info.get("doc_meta")
     dry_run_badge = " 🔍 Dry-run" if is_dry_run else ""
 
     # FIX #12 — use shared helper; no duplicated deduplication logic here
@@ -1662,9 +1911,13 @@ for filename, info in processing_logs.items():
     with st.expander(
         f"🔍 {safe_filename} — {_html.escape(region)} — {unique_count} substitution(s){dry_run_badge}"
     ):
-        st.caption(
-            f"Processed at: {processed_at} | Region detected via: {_html.escape(detection_method)}"
-        )
+        caption_parts = [f"Processed at: {processed_at}"]
+        if meta:
+            caption_parts.append(f"Type: {_html.escape(meta.display_label)}")
+            if meta.order_type_label:
+                caption_parts.append(f"Order: {_html.escape(meta.order_type_label)}")
+        caption_parts.append(f"Detected via: {_html.escape(detection_method)}")
+        st.caption(" | ".join(caption_parts))
         _render_summary_table(log, filename, height_px=700)
 
 # --- Footer ---

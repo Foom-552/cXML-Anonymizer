@@ -61,16 +61,23 @@ All other fields (names, addresses, identifiers, etc.) are still fully anonymize
 
 ---
 
-## Supported Regions
+## Supported Regions & Countries
 
-| Code | Region |
-|------|--------|
-| AU | Australia (default fallback) |
-| NAMAR | North America |
-| EMEA | Europe, Middle East & Africa |
-| Japan | Japan |
+The anonymizer detects the country from `<Country isoCountryCode>` (majority-vote across all elements), `<Money currency>`, or `<Country>` text content. Each detected country gets locale-accurate anonymized values. Countries without a dedicated profile fall back to their region's default.
 
-Region is auto-detected from document signals in priority order: `isoCountryCode` attribute, `currency` attribute, `<Country>` text content. Falls back to AU if no signal is found.
+| Region | Default | Countries with Dedicated Profiles |
+|--------|---------|-----------------------------------|
+| **APAC** | Australia (AU) | AU, NZ, IN, CN, SG, KR, TH, ID, PH, MY |
+| **NAMAR** | United States (US) | US, CA, MX |
+| **EMEA** | Germany (DE) | DE, GB, FR, NL, CH, SE, AE, SA, ZA, IL, TR |
+| **Japan** | Japan (JP) | JP |
+| **LATAM** | Brazil (BR) | BR, AR, CO, CL |
+
+Additional countries are mapped to regions (e.g. VN → APAC, PL → EMEA, PE → LATAM) and use the region default profile. Falls back to Australia (APAC) if no signal is found.
+
+Detection features:
+- **Majority-vote**: when multiple `<Country>` elements have different codes, the most common one wins
+- **Unmapped code visibility**: unmapped ISO codes are reported in the detection method so you can see what fell through
 
 ---
 
