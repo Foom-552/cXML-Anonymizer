@@ -1163,25 +1163,8 @@ def create_zip_file(files_dict: dict[str, str]) -> io.BytesIO:
 # ---------------------------------------------------------------------------
 
 def _render_scrollable_xml(xml_text: str, height_px: int = 400) -> None:
-    """Display XML content inside a scrollable <div> with a fixed max height."""
-    escaped = _html.escape(xml_text)
-    st.markdown(
-        f"""
-        <div style="
-            max-height: {height_px}px;
-            overflow: auto;
-            border: 1px solid var(--tc-border);
-            border-radius: 6px;
-            background-color: var(--tc-bg-primary);
-            padding: 0.75rem;
-            font-size: 0.82rem;
-            line-height: 1.4;
-        ">
-            <pre style="margin:0; white-space:pre; color:var(--tc-text-code);"><code>{escaped}</code></pre>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    """Display XML content with syntax highlighting in a height-constrained container."""
+    st.code(xml_text, language="xml", line_numbers=True, height=height_px)
 
 
 # ---------------------------------------------------------------------------
@@ -1189,89 +1172,29 @@ def _render_scrollable_xml(xml_text: str, height_px: int = 400) -> None:
 # ---------------------------------------------------------------------------
 
 def _render_summary_table(log: list[dict], filename: str, height_px: int = 400) -> None:
-    """Render the substitution log as a scrollable HTML table with a TSV download.
-
-    FIX #12 — deduplication delegated to _deduplicate_log().
-    FIX #8  — CSS table ID uses _stable_id() instead of abs(hash()).
-    FIX #10 — Streamlit widget key uses _stable_id() instead of a mutable counter.
-    """
+    """Render the substitution log as a native Streamlit dataframe with a TSV download."""
     unique_log = _deduplicate_log(log)
 
     if not unique_log:
         st.info("No substitutions were recorded for this file.")
         return
 
-    rows_html = ""
-    for idx, entry in enumerate(unique_log, 1):
-        field = _html.escape(entry["field"])
-        original = _html.escape(entry["original"]) if entry["original"] else "<em>(empty)</em>"
-        anonymized = _html.escape(entry["anonymized"])
-        rows_html += (
-            f"<tr>"
-            f"<td style='padding:6px 10px; border-bottom:1px solid var(--tc-border-row); color:var(--tc-text-secondary); "
-            f"text-align:center; white-space:nowrap;'>{idx}</td>"
-            f"<td style='padding:6px 10px; border-bottom:1px solid var(--tc-border-row); color:var(--tc-text-field); "
-            f"font-family:monospace; font-size:0.82rem; white-space:nowrap;'>{field}</td>"
-            f"<td style='padding:6px 10px; border-bottom:1px solid var(--tc-border-row); color:var(--tc-text-original); "
-            f"font-family:monospace; font-size:0.82rem; white-space:nowrap;'>{original}</td>"
-            f"<td style='padding:6px 10px; border-bottom:1px solid var(--tc-border-row); color:var(--tc-text-anonymized); "
-            f"font-family:monospace; font-size:0.82rem; white-space:nowrap;'>{anonymized}</td>"
-            f"</tr>"
-        )
-
-    # FIX #8 — stable, collision-resistant CSS ID
-    table_id = f"summary-table-{_stable_id(filename)}"
-
-    table_html = f"""
-    <style>
-        #{table_id} {{
-            max-height: {height_px}px;
-            overflow-x: auto !important;
-            overflow-y: auto !important;
-            display: block;
-            width: 100%;
-            border: 1px solid var(--tc-border);
-            border-radius: 6px;
-            background-color: var(--tc-bg-primary);
-        }}
-        #{table_id}::-webkit-scrollbar {{ width: 10px; height: 10px; }}
-        #{table_id}::-webkit-scrollbar-track {{ background: var(--tc-scrollbar-track); border-radius: 6px; }}
-        #{table_id}::-webkit-scrollbar-thumb {{
-            background: var(--tc-scrollbar-thumb); border-radius: 6px; border: 2px solid var(--tc-scrollbar-track);
-        }}
-        #{table_id}::-webkit-scrollbar-thumb:hover {{ background: var(--tc-scrollbar-thumb-hover); }}
-        #{table_id}::-webkit-scrollbar-corner {{ background: var(--tc-scrollbar-track); }}
-    </style>
-    <div id="{table_id}">
-        <table style="width: max-content; min-width: 100%; border-collapse: collapse; font-size: 0.85rem;">
-            <thead>
-                <tr style="background-color: var(--tc-bg-secondary); position: sticky; top: 0; z-index: 1;">
-                    <th style="padding:8px 10px; border-bottom:2px solid var(--tc-border); color:var(--tc-text-primary);
-                        text-align:center; width:50px; white-space:nowrap;
-                        position:sticky; top:0; background-color:var(--tc-bg-secondary);">#</th>
-                    <th style="padding:8px 10px; border-bottom:2px solid var(--tc-border); color:var(--tc-text-primary);
-                        text-align:left; min-width:250px; white-space:nowrap;
-                        position:sticky; top:0; background-color:var(--tc-bg-secondary);">Field</th>
-                    <th style="padding:8px 10px; border-bottom:2px solid var(--tc-border); color:var(--tc-text-primary);
-                        text-align:left; min-width:280px; white-space:nowrap;
-                        position:sticky; top:0; background-color:var(--tc-bg-secondary);">Original Value</th>
-                    <th style="padding:8px 10px; border-bottom:2px solid var(--tc-border); color:var(--tc-text-primary);
-                        text-align:left; min-width:280px; white-space:nowrap;
-                        position:sticky; top:0; background-color:var(--tc-bg-secondary);">Anonymized Value</th>
-                </tr>
-            </thead>
-            <tbody>{rows_html}</tbody>
-        </table>
-    </div>
-    """
-    st.markdown(table_html, unsafe_allow_html=True)
+    data = [
+        {
+            "#": idx,
+            "Field": entry["field"],
+            "Original Value": entry["original"] or "(empty)",
+            "Anonymized Value": entry["anonymized"],
+        }
+        for idx, entry in enumerate(unique_log, 1)
+    ]
+    st.dataframe(data, use_container_width=True, height=height_px, hide_index=True)
 
     tsv_lines = ["#\tField\tOriginal Value\tAnonymized Value"]
     for idx, entry in enumerate(unique_log, 1):
         tsv_lines.append(f"{idx}\t{entry['field']}\t{entry['original']}\t{entry['anonymized']}")
     tsv_text = "\n".join(tsv_lines)
 
-    # FIX #10 — deterministic widget key; no mutable session-state counter needed
     st.download_button(
         label="📋 Download as TSV (paste into Excel / Sheets)",
         data=tsv_text,
@@ -1294,27 +1217,16 @@ def _inject_theme_css(dark: bool) -> None:
     if dark:
         vars_css = """
         :root {
-            --tc-bg-primary:            #0e1117;
-            --tc-bg-secondary:          #161b22;
             --tc-bg-valid:              #0e4429;
             --tc-bg-invalid:            #4a1a1a;
             --tc-bg-warning:            #1a1a2e;
             --tc-border:                #444444;
             --tc-border-valid:          #238636;
             --tc-border-invalid:        #d73a49;
-            --tc-border-row:            #333333;
-            --tc-text-primary:          #c9d1d9;
             --tc-text-secondary:        #8b949e;
-            --tc-text-code:             #fafafa;
-            --tc-text-field:            #79c0ff;
-            --tc-text-original:         #f85149;
-            --tc-text-anonymized:       #3fb950;
             --tc-text-valid:            #3fb950;
             --tc-text-invalid:          #f85149;
             --tc-text-warning:          #faad14;
-            --tc-scrollbar-track:       #161b22;
-            --tc-scrollbar-thumb:       #484f58;
-            --tc-scrollbar-thumb-hover: #6e7681;
         }
         """
         chrome_css = """
@@ -1418,27 +1330,16 @@ def _inject_theme_css(dark: bool) -> None:
     else:
         vars_css = """
         :root {
-            --tc-bg-primary:            #f6f8fa;
-            --tc-bg-secondary:          #ffffff;
             --tc-bg-valid:              #dafbe1;
             --tc-bg-invalid:            #ffebe9;
             --tc-bg-warning:            #fff8c5;
             --tc-border:                #d0d7de;
             --tc-border-valid:          #2da44e;
             --tc-border-invalid:        #d1242f;
-            --tc-border-row:            #e0e5ea;
-            --tc-text-primary:          #1f2328;
             --tc-text-secondary:        #636c76;
-            --tc-text-code:             #24292f;
-            --tc-text-field:            #0550ae;
-            --tc-text-original:         #cf222e;
-            --tc-text-anonymized:       #1a7f37;
             --tc-text-valid:            #1a7f37;
             --tc-text-invalid:          #cf222e;
             --tc-text-warning:          #9a6700;
-            --tc-scrollbar-track:       #f0f2f6;
-            --tc-scrollbar-thumb:       #c8ccd1;
-            --tc-scrollbar-thumb-hover: #9ba0a8;
         }
         """
         # Light mode: Streamlit's own light theme (config.toml base=light) is correct;
@@ -1749,7 +1650,7 @@ for i, uploaded_file in enumerate(uploaded_files):
                     f"**{safe_display_name}:** {_html.escape(validation_message)}"
                 )
 
-        with st.expander(f"👁️ Preview source — {safe_display_name}"):
+        with st.expander(f"👁️ Preview source — {uploaded_file.name}"):
             _render_scrollable_xml(file_content, height_px=300)
 
         if is_valid:
@@ -1900,10 +1801,9 @@ if not dry_run and anonymized_files:
 
     st.markdown("**Individual Files:**")
     for filename, content in anonymized_files.items():
-        safe_filename = _html.escape(filename)   # FIX #2
         col1, col2 = st.columns([3, 1])
         with col1:
-            with st.expander(f"👁️ Preview anonymized — {safe_filename}"):
+            with st.expander(f"👁️ Preview anonymized — {filename}"):
                 _render_scrollable_xml(content, height_px=1000)
         with col2:
             st.download_button(
@@ -1928,19 +1828,17 @@ for filename, info in processing_logs.items():
     meta = info.get("doc_meta")
     dry_run_badge = " 🔍 Dry-run" if is_dry_run else ""
 
-    # FIX #12 — use shared helper; no duplicated deduplication logic here
     unique_count = len(_deduplicate_log(log))
-    safe_filename = _html.escape(filename)   # FIX #2
 
     with st.expander(
-        f"🔍 {safe_filename} — {_html.escape(region)} — {unique_count} substitution(s){dry_run_badge}"
+        f"🔍 {filename} — {region} — {unique_count} substitution(s){dry_run_badge}"
     ):
         caption_parts = [f"Processed at: {processed_at}"]
         if meta:
-            caption_parts.append(f"Type: {_html.escape(meta.display_label)}")
+            caption_parts.append(f"Type: {meta.display_label}")
             if meta.order_type_label:
-                caption_parts.append(f"Order: {_html.escape(meta.order_type_label)}")
-        caption_parts.append(f"Detected via: {_html.escape(detection_method)}")
+                caption_parts.append(f"Order: {meta.order_type_label}")
+        caption_parts.append(f"Detected via: {detection_method}")
         st.caption(" | ".join(caption_parts))
         _render_summary_table(log, filename, height_px=700)
 
