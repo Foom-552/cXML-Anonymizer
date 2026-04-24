@@ -517,11 +517,18 @@ class DocumentMeta:
     order_version: str | None = None
     order_type: str | None = None
     has_document_reference: bool = False
+    is_service_po: bool = False
 
     @property
     def display_label(self) -> str:
-        if self.base_type == "OrderRequest" and self.sub_type != "New":
-            return f"OrderRequest ({self.sub_type})"
+        if self.base_type == "OrderRequest":
+            parts = []
+            if self.sub_type != "New":
+                parts.append(self.sub_type)
+            if self.is_service_po:
+                parts.append("Service")
+            if parts:
+                return f"OrderRequest ({', '.join(parts)})"
         return self.base_type
 
     @property
@@ -608,6 +615,35 @@ def _looks_like_xml(content: str) -> bool:
     return stripped.startswith("<?xml") or stripped.startswith("<cXML")
 
 
+def _replace_date_today(date_str: str) -> str:
+    """Replace the date part of a cXML ISO 8601 datetime with today's date,
+    preserving the original time component and timezone offset.
+    Returns date_str unchanged if the format is unrecognised.
+    """
+    m = re.match(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})(.*)", date_str)
+    if not m:
+        return date_str
+    return f"{datetime.now().strftime('%Y-%m-%d')}{m.group(1)}{m.group(2)}"
+
+
+def _shift_date_10y(date_str: str) -> str:
+    """Shift a cXML ISO 8601 date string's year +10, preserving month/day/time/tz.
+    Handles Feb 29 → Feb 28 when the target year is not a leap year.
+    Returns date_str unchanged if the format is unrecognised.
+    """
+    m = re.match(r"^(\d{4})(-\d{2})(-\d{2})(T\d{2}:\d{2}:\d{2})(.*)", date_str)
+    if not m:
+        return date_str
+    year, month, day = int(m.group(1)), m.group(2), m.group(3)
+    time_part, tz_part = m.group(4), m.group(5)
+    new_year = year + 10
+    if month == "-02" and day == "-29":
+        is_leap = (new_year % 4 == 0 and new_year % 100 != 0) or (new_year % 400 == 0)
+        if not is_leap:
+            day = "-28"
+    return f"{new_year}{month}{day}{time_part}{tz_part}"
+
+
 # ---------------------------------------------------------------------------
 # REGION DETECTION
 # ---------------------------------------------------------------------------
@@ -691,7 +727,9 @@ def detect_country(root: lxml_ET._Element) -> tuple[str, str, str]:
 # ---------------------------------------------------------------------------
 
 def _detect_order_request_subtype(request_el: lxml_ET._Element) -> DocumentMeta:
-    """Classify an OrderRequest based on header attributes (type, orderVersion, orderType)."""
+    """Classify an OrderRequest based on header attributes (type, orderVersion, orderType)
+    and element-tree content (Service PO detection via SpendDetail/ServicePeriod).
+    """
     orh = request_el.find(".//OrderRequestHeader")
     if orh is None:
         return DocumentMeta(base_type="OrderRequest")
@@ -700,6 +738,9 @@ def _detect_order_request_subtype(request_el: lxml_ET._Element) -> DocumentMeta:
     order_version = orh.get("orderVersion", "1")
     order_type = orh.get("orderType", "regular")
     has_doc_ref = orh.find("DocumentReference") is not None
+    has_service_period = (
+        request_el.find(".//SpendDetail/Extrinsic[@name='ServicePeriod']") is not None
+    )
 
     if po_type == "delete":
         sub_type = "Cancel"
@@ -718,6 +759,7 @@ def _detect_order_request_subtype(request_el: lxml_ET._Element) -> DocumentMeta:
         order_version=order_version,
         order_type=order_type,
         has_document_reference=has_doc_ref,
+        is_service_po=has_service_period,
     )
 
 
@@ -1037,6 +1079,14 @@ def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> li
                     "original": child.text or "",
                     "anonymized": "(preserved — unchanged)",
                 })
+            elif extrinsic_name == "ServicePeriod":
+                # Structured extrinsic — contains a <Period> child element, not text.
+                # Do NOT replace child.text; the <Period> dates are handled below via recursion.
+                log.append({
+                    "field": '<Extrinsic name="ServicePeriod">',
+                    "original": "(structured — Period dates below)",
+                    "anonymized": "(structure preserved — Period dates anonymized)",
+                })
             else:
                 anonymized_value = EXTRINSIC_ANONYMIZATION_MAP.get(
                     extrinsic_name, "ANONYMIZED_EXTRINSIC_VALUE"
@@ -1049,6 +1099,23 @@ def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> li
                         "field": f"<Extrinsic {label}>",
                         "original": old_text,
                         "anonymized": anonymized_value,
+                    })
+
+        # Service period date anonymization — all <Period> elements in document.
+        # startDate → today's run date (time/tz preserved); endDate → year +10.
+        if local_tag == "Period":
+            for attr, transform in [
+                ("startDate", _replace_date_today),
+                ("endDate", _shift_date_10y),
+            ]:
+                old_val = child.get(attr)
+                if old_val is not None:
+                    new_val = transform(old_val)
+                    child.set(attr, new_val)
+                    log.append({
+                        "field": f"<Period {attr}>",
+                        "original": old_val,
+                        "anonymized": new_val,
                     })
 
         # IdReference identifiers are always scrubbed
@@ -1220,6 +1287,7 @@ def _inject_theme_css(dark: bool) -> None:
             --tc-bg-valid:              #0e4429;
             --tc-bg-invalid:            #4a1a1a;
             --tc-bg-warning:            #1a1a2e;
+            --tc-bg-service:            #0d2444;
             --tc-border:                #444444;
             --tc-border-valid:          #238636;
             --tc-border-invalid:        #d73a49;
@@ -1227,6 +1295,7 @@ def _inject_theme_css(dark: bool) -> None:
             --tc-text-valid:            #3fb950;
             --tc-text-invalid:          #f85149;
             --tc-text-warning:          #faad14;
+            --tc-text-service:          #79c0ff;
         }
         """
         chrome_css = """
@@ -1333,6 +1402,7 @@ def _inject_theme_css(dark: bool) -> None:
             --tc-bg-valid:              #dafbe1;
             --tc-bg-invalid:            #ffebe9;
             --tc-bg-warning:            #fff8c5;
+            --tc-bg-service:            #ddf4ff;
             --tc-border:                #d0d7de;
             --tc-border-valid:          #2da44e;
             --tc-border-invalid:        #d1242f;
@@ -1340,6 +1410,7 @@ def _inject_theme_css(dark: bool) -> None:
             --tc-text-valid:            #1a7f37;
             --tc-text-invalid:          #cf222e;
             --tc-text-warning:          #9a6700;
+            --tc-text-service:          #0550ae;
         }
         """
         # Light mode: Streamlit's own light theme (config.toml base=light) is correct;
@@ -1599,6 +1670,11 @@ for i, uploaded_file in enumerate(uploaded_files):
                     badge_border = "var(--tc-border-invalid)"
                     badge_text_color = "var(--tc-text-invalid)"
                     badge_icon = "🚫"
+                elif doc_meta and doc_meta.is_service_po:
+                    badge_bg = "var(--tc-bg-service)"
+                    badge_border = "#0550ae"
+                    badge_text_color = "var(--tc-text-service)"
+                    badge_icon = "🔧"
                 else:
                     badge_bg = "var(--tc-bg-valid)"
                     badge_border = "var(--tc-border-valid)"
