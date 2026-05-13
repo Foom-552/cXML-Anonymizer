@@ -110,13 +110,19 @@ Uploaded files are processed entirely in-memory within the user's session and ar
 
 ---
 
+## Repository
+
+**SAP Internal:** https://github.tools.sap/I347397/cxml-anonymizer
+
+---
+
 ## Local Setup
 
 **Requirements:** Python 3.10+
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/cxml-anonymizer.git
+git clone https://github.tools.sap/I347397/cxml-anonymizer.git
 cd cxml-anonymizer
 
 # Install dependencies
