@@ -394,6 +394,9 @@ PRESERVE_EXTRINSIC_NAMES: set[str] = {
     "Ariba.invoicingAllowed",
     "AribaNetwork.PaymentTermsExplanation",
     "transactionCategoryOrType",
+    # Invoice structural classifiers — document type, not PII
+    "invoiceSourceDocument",
+    "invoiceType",
 }
 
 EXTRINSIC_ANONYMIZATION_MAP: dict[str, str] = {
@@ -486,6 +489,47 @@ EXTRINSIC_ANONYMIZATION_MAP: dict[str, str] = {
     "comment": "Anonymized comment.",
     "description": "Anonymized description.",
     "internalNote": "Anonymized internal note.",
+    # Invoice document references
+    "invoiceNumber": "ANON-INVOICE-NO-00000",
+    "poNumber": "ANON-PO-NO-00000",
+    "purchaseOrderNumber": "ANON-PO-NO-00000",
+    "deliveryNoteNo": "ANON-DELIVERY-NO-00000",
+    "deliveryNoteNumber": "ANON-DELIVERY-NO-00000",
+    "goodsReceiptNo": "ANON-GR-NO-00000",
+    "goodsReceiptNumber": "ANON-GR-NO-00000",
+    "serviceEntrySheetNo": "ANON-SES-NO-00000",
+    "serviceEntrySheet": "ANON-SES-NO-00000",
+    "creditNoteReason": "ANON-CREDIT-REASON",
+    "creditNoteReasonCode": "ANON-CREDIT-CODE",
+    "creditNoteNumber": "ANON-CREDIT-NO-00000",
+    # Banking / payment details
+    "bankAccountNumber": "ANON-BANK-ACCT-00000",
+    "bankAccount": "ANON-BANK-ACCT-00000",
+    "iban": "ANON-IBAN-00000000",
+    "ibanNumber": "ANON-IBAN-00000000",
+    "ibanCode": "ANON-IBAN-00000000",
+    "swiftCode": "ANONBICX",
+    "bic": "ANONBICX",
+    "bankRoutingNumber": "ANON-ROUTING-00000",
+    "bankCode": "ANON-BANK-CODE",
+    "bankName": "Anonymized Bank",
+    "bankBranchCode": "ANON-BRANCH-00000",
+    "remittanceAdvice": "ANON-REMITTANCE-REF",
+    "paymentReference": "ANON-PAYMENT-REF-00000",
+    # Legal entity identifiers
+    "legalEntityName": "Anonymized Legal Entity",
+    "legalEntityID": "ANON-LEGAL-ID-00000",
+    "taxRepresentativeName": "Anonymized Tax Representative",
+    "fiscalRepresentativeVatID": "ANON-FISCAL-VAT-00000",
+    "companyRegistrationNumber": "ANON-REG-NO-00000",
+    "commercialRegistrationNumber": "ANON-COMM-REG-00000",
+    # Invoice contact / submitter fields
+    "submitterEmail": "submitter@anonymized.com",
+    "submitterName": "Anonymized Submitter",
+    "buyerContactEmail": "buyer.contact@anonymized.com",
+    "supplierContactName": "Anonymized Supplier Contact",
+    "invoicingContact": "Anonymized Invoicing Contact",
+    "contactEmail": "contact@anonymized.com",
 }
 
 CXML_DOCTYPE = '<!DOCTYPE cXML SYSTEM "http://xml.cxml.org/schemas/cXML/1.2.069/cXML.dtd">'
@@ -565,6 +609,163 @@ _ORDER_TYPE_ATTRS: dict[str, dict[str, str | None]] = {
 # HELPERS
 # ---------------------------------------------------------------------------
 
+# Category membership sets — used by _log_category to label substitution log entries.
+_LOG_BANKING_FIELDS: frozenset[str] = frozenset({
+    "bankAccountNumber", "bankAccount", "iban", "ibanNumber", "ibanCode",
+    "swiftCode", "bic", "bankRoutingNumber", "bankCode", "bankName",
+    "bankBranchCode", "remittanceAdvice", "paymentReference",
+})
+_LOG_LEGAL_FIELDS: frozenset[str] = frozenset({
+    "legalEntityName", "legalEntityID", "taxRepresentativeName",
+    "fiscalRepresentativeVatID", "companyRegistrationNumber", "commercialRegistrationNumber",
+})
+_LOG_TAX_FIELDS: frozenset[str] = frozenset({
+    "supplierVatID", "buyerVatID", "vatID", "taxID", "taxExemptionNumber",
+    "abn", "gst", "businessIdentNo",
+})
+_LOG_CONTACT_FIELDS: frozenset[str] = frozenset({
+    "submitterEmail", "submitterName", "buyerContactEmail",
+    "supplierContactName", "invoicingContact", "contactEmail",
+    "userIdentification", "mailbox", "Requester", "contactName",
+    "buyerContact", "supplierContact", "requestorName", "approverName",
+    "approverEmail", "userID", "userId", "loginID", "username",
+})
+_LOG_INVOICE_DOC_FIELDS: frozenset[str] = frozenset({
+    "invoiceNumber", "poNumber", "purchaseOrderNumber",
+    "deliveryNoteNo", "deliveryNoteNumber", "goodsReceiptNo",
+    "goodsReceiptNumber", "serviceEntrySheetNo", "serviceEntrySheet",
+    "creditNoteReason", "creditNoteReasonCode", "creditNoteNumber",
+    "invoiceID", "deliveryNoteID",
+})
+
+# Profile-driven tags that represent individual identities (not geographic data).
+# These are anonymized with per-value distinction: two different original values
+# produce two different placeholders; the same original value always produces the
+# same placeholder within a document.
+_DISTINCT_PROFILE_TAGS: frozenset[str] = frozenset({
+    "Name",       # contact / company name
+    "Email",      # email address
+    "Number",     # phone / fax number inside <TelephoneNumber>
+    "Street",     # street address line
+    "DeliverTo",  # delivery recipient
+})
+
+
+def _log_category(entry: dict) -> str:
+    """Infer a display category label for a substitution log entry.
+
+    Uses the 'field' string (set at log-append time) as the primary signal
+    so no call-site changes are needed in the existing logging code.
+    """
+    field = entry.get("field", "")
+
+    # Header-level entries
+    if (
+        field.startswith("<cXML")
+        or "Credential" in field
+        or "UserAgent" in field
+        or field.startswith("<Request")
+        or field.startswith("<OrderRequestHeader")
+        or field.startswith("<DocumentReference")
+    ):
+        return "Header"
+
+    # Service period date entries
+    if field.startswith("<Period"):
+        return "Service Period"
+
+    # Financial entries (Money amounts / currencies)
+    if "<Money" in field:
+        return "Financial"
+
+    # IdReference entries
+    if "<IdReference" in field:
+        return "Reference"
+
+    # Extrinsic entries — refine by field name
+    if "<Extrinsic" in field:
+        # Extract the name= value from the field string, e.g. '<Extrinsic name="buyerVatID">'
+        if 'name="' in field:
+            extrinsic_name = field.split('name="')[1].split('"')[0]
+            if extrinsic_name in _LOG_BANKING_FIELDS:
+                return "Extrinsic › Banking"
+            if extrinsic_name in _LOG_LEGAL_FIELDS:
+                return "Extrinsic › Legal"
+            if extrinsic_name in _LOG_TAX_FIELDS:
+                return "Extrinsic › Tax"
+            if extrinsic_name in _LOG_CONTACT_FIELDS:
+                return "Extrinsic › Contact"
+            if extrinsic_name in _LOG_INVOICE_DOC_FIELDS:
+                return "Extrinsic › Invoice Ref"
+            if extrinsic_name in PRESERVE_EXTRINSIC_NAMES:
+                return "Extrinsic › Preserved"
+        return "Extrinsic › General"
+
+    # Extrinsic attachment URL (from _anonymize_extrinsic_children)
+    if "URL (Extrinsic" in field:
+        return "Extrinsic › Attachment"
+
+    # Country / postal code / phone / contact elements
+    contact_tags = {"<Name", "<Email", "<Street", "<City", "<State", "<PostalCode",
+                    "<Country", "<Phone", "<Fax", "<Number", "<TelephoneNumber",
+                    "<AreaOrCityCode", "<CountryCode"}
+    if any(field.startswith(t) for t in contact_tags):
+        return "Contact"
+
+    return "General"
+
+
+def _prescan_extrinsic_values(tree: lxml_ET._Element, value_map: dict) -> None:
+    """Pre-populate *value_map* with typed anonymized values for all Extrinsic
+    elements that appear in EXTRINSIC_ANONYMIZATION_MAP.
+
+    This must run before anonymize_elements() so that any IdReference whose
+    identifier matches an Extrinsic value inherits the typed placeholder rather
+    than the generic 'ANONYMIZED_IDENTIFIER'.  In a depth-first traversal,
+    <IdReference> elements inside <InvoicePartner> often appear before the
+    trailing <Extrinsic> elements; the pre-scan inverts that order.
+    """
+    for elem in tree.iter():
+        local_tag = lxml_ET.QName(elem.tag).localname
+        if local_tag != "Extrinsic":
+            continue
+        name = elem.get("name", "")
+        val = (elem.text or "").strip()
+        if val and name in EXTRINSIC_ANONYMIZATION_MAP and val not in value_map:
+            value_map[val] = EXTRINSIC_ANONYMIZATION_MAP[name]
+
+
+def _anonymize_extrinsic_children(
+    extrinsic_elem: lxml_ET._Element,
+    value_map: dict,
+    log: list[dict],
+) -> None:
+    """Anonymize child elements of a structural Extrinsic (one with sub-elements
+    rather than plain text content — e.g. <Extrinsic name="invoicePDF"><Attachment>).
+
+    Currently handles <URL> children:
+      - cid:... references → cid:anonymized@cxml.org
+      - http(s):... references → https://anonymized.example.com
+    """
+    for child in extrinsic_elem.iter():
+        local_tag = lxml_ET.QName(child.tag).localname
+        if local_tag == "URL" and child.text and child.text.strip():
+            original = child.text.strip()
+            if original.startswith("cid:"):
+                replacement = "cid:anonymized@cxml.org"
+            else:
+                replacement = "https://anonymized.example.com"
+            if original not in value_map:
+                value_map[original] = replacement
+            child.text = replacement
+            log.append({
+                "field": f"<URL> (Extrinsic child)",
+                "original": original,
+                "anonymized": replacement,
+            })
+MAX_STEM_LENGTH = 64
+
+
 STABLE_ID_HEX_LENGTH = 12
 MAX_STEM_LENGTH = 64
 
@@ -592,7 +793,6 @@ def _deduplicate_log(log: list[dict]) -> list[dict]:
             seen.add(key)
             unique.append(entry)
     return unique
-
 
 def _sanitize_stem(raw_name: str, max_len: int = MAX_STEM_LENGTH) -> str:
     """Return a filesystem-safe stem derived from *raw_name*.
@@ -1027,8 +1227,61 @@ def _replace_credential(parent: lxml_ET._Element, identity: str, domain: str) ->
     lxml_ET.SubElement(cred, "Identity").text = identity
 
 
-def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> list[dict]:
+def _phone_variant(base: str, n: int) -> str:
+    """Increment the trailing digit block of a phone placeholder to create the n-th variant.
+
+    e.g. base="0891234567", n=2 → "0891234568"; n=3 → "0891234569"
+    """
+    i = len(base)
+    while i > 0 and base[i - 1].isdigit():
+        i -= 1
+    prefix, digits = base[:i], base[i:]
+    if not digits:
+        return f"{base}-{n}"
+    return f"{prefix}{str(int(digits) + (n - 1)).zfill(len(digits))}"
+
+
+def _street_variant(base: str, n: int) -> str:
+    """Increment the leading street number by (n-1)*10 for each distinct variant.
+
+    e.g. base="123 Anonymized St", n=2 → "133 Anonymized St"
+    """
+    import re as _re
+    m = _re.match(r'^(\d+)(.*)', base)
+    if m:
+        return f"{int(m.group(1)) + (n - 1) * 10}{m.group(2)}"
+    return f"{base} {n}"
+
+
+def _profile_variant(tag: str, base: str, n: int) -> str:
+    """Return the n-th distinct anonymized value for a profile-driven identity field.
+
+    n=1 always returns the unmodified base value (backward compatible).
+    Subsequent distinct real values in the same document get sequential variants.
+    """
+    if n == 1:
+        return base
+    if tag == "Number":
+        return _phone_variant(base, n)
+    if tag == "Email":
+        local, _, domain = base.partition("@")
+        return f"{local}{n}@{domain}"
+    if tag == "Street":
+        return _street_variant(base, n)
+    return f"{base} {n}"   # Name, DeliverTo, and any future identity tag
+
+
+def anonymize_elements(
+    element: lxml_ET._Element,
+    profile: dict[str, str],
+    value_map: dict | None = None,
+) -> list[dict]:
     """Recursively traverse *element* and apply anonymization rules from *profile*.
+
+    *value_map* is a per-file dict that tracks real-value → anonymized-value
+    mappings so the same real identifier always produces the same anonymized
+    placeholder within a single document (e.g. a VAT ID appearing in both an
+    Extrinsic and an <IdReference> will be replaced consistently).
 
     Returns a list of dicts with keys: field, original, anonymized.
     """
@@ -1039,14 +1292,34 @@ def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> li
 
         # --- Element text substitution ---
         if local_tag in profile:
-            old = child.text or ""
-            child.text = profile[local_tag]
-            if old != child.text:
-                log.append({
-                    "field": f"<{local_tag}> text",
-                    "original": old,
-                    "anonymized": profile[local_tag],
-                })
+            old = (child.text or "").strip()
+            if old and local_tag in _DISTINCT_PROFILE_TAGS and value_map is not None:
+                # Identity field: use value_map for per-value distinction + consistency.
+                if old in value_map:
+                    replacement = value_map[old]
+                else:
+                    cnt_key = f"__cnt:{local_tag}"
+                    n = value_map.get(cnt_key, 0) + 1
+                    value_map[cnt_key] = n
+                    replacement = _profile_variant(local_tag, profile[local_tag], n)
+                    value_map[old] = replacement
+                child.text = replacement
+                if old != replacement:
+                    log.append({
+                        "field": f"<{local_tag}> text",
+                        "original": old,
+                        "anonymized": replacement,
+                    })
+            else:
+                # Geographic / financial tags, empty text, or no value_map → plain profile value.
+                old_raw = child.text or ""
+                child.text = profile[local_tag]
+                if old_raw != child.text:
+                    log.append({
+                        "field": f"<{local_tag}> text",
+                        "original": old_raw,
+                        "anonymized": profile[local_tag],
+                    })
 
         # Special-case: Money currency attribute
         if local_tag == "Money" and "currency" in profile:
@@ -1087,6 +1360,10 @@ def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> li
                     "original": "(structured — Period dates below)",
                     "anonymized": "(structure preserved — Period dates anonymized)",
                 })
+            elif (child.text is None or not child.text.strip()) and len(child) > 0:
+                # Structural Extrinsic with child elements (e.g. invoicePDF with Attachment/URL).
+                # Replace child content rather than trying to set .text.
+                _anonymize_extrinsic_children(child, value_map if value_map is not None else {}, log)
             else:
                 anonymized_value = EXTRINSIC_ANONYMIZATION_MAP.get(
                     extrinsic_name, "ANONYMIZED_EXTRINSIC_VALUE"
@@ -1100,6 +1377,9 @@ def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> li
                         "original": old_text,
                         "anonymized": anonymized_value,
                     })
+                # Record in value_map so matching IdReference identifiers use the same placeholder
+                if value_map is not None and old_text.strip() and old_text.strip() not in value_map:
+                    value_map[old_text.strip()] = anonymized_value
 
         # Service period date anonymization — all <Period> elements in document.
         # startDate → today's run date (time/tz preserved); endDate → year +10.
@@ -1118,20 +1398,32 @@ def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> li
                         "anonymized": new_val,
                     })
 
-        # IdReference identifiers are always scrubbed
+        # IdReference identifiers — use value_map for cross-reference consistency
         if local_tag == "IdReference" and "identifier" in child.attrib:
-            old_id = child.get("identifier", "")
-            child.set("identifier", "ANONYMIZED_IDENTIFIER")
-            log.append({
-                "field": "<IdReference identifier>",
-                "original": old_id,
-                "anonymized": "ANONYMIZED_IDENTIFIER",
-            })
+            old_id = child.get("identifier", "").strip()
+            if value_map is not None and old_id and old_id in value_map:
+                # Same real value appeared earlier (e.g. as an Extrinsic) — reuse that placeholder
+                consistent_val = value_map[old_id]
+                child.set("identifier", consistent_val)
+                log.append({
+                    "field": "<IdReference identifier>",
+                    "original": old_id,
+                    "anonymized": consistent_val,
+                })
+            else:
+                child.set("identifier", "ANONYMIZED_IDENTIFIER")
+                if value_map is not None and old_id:
+                    value_map[old_id] = "ANONYMIZED_IDENTIFIER"
+                log.append({
+                    "field": "<IdReference identifier>",
+                    "original": old_id,
+                    "anonymized": "ANONYMIZED_IDENTIFIER",
+                })
 
         # --- Attribute substitution ---
         # Skip OrderRequestHeader — its attributes are fully managed by apply_header_template
         if local_tag == "OrderRequestHeader":
-            log.extend(anonymize_elements(child, profile))
+            log.extend(anonymize_elements(child, profile, value_map))
             continue
         for attr_name in list(child.attrib):
             local_attr = lxml_ET.QName(attr_name).localname
@@ -1155,7 +1447,7 @@ def anonymize_elements(element: lxml_ET._Element, profile: dict[str, str]) -> li
                     "anonymized": "ANONYMIZED",
                 })
 
-        log.extend(anonymize_elements(child, profile))
+        log.extend(anonymize_elements(child, profile, value_map))
 
     return log
 
@@ -1200,8 +1492,14 @@ def process_cxml_content(
     active_profile.pop("display_name", None)
     active_profile.pop("region", None)
 
+    # Per-file consistency map: real_value → anonymized_value.
+    # Pre-scan populates it with typed Extrinsic values first so IdReferences
+    # processed later in the depth-first traversal inherit the same placeholder.
+    value_map: dict[str, str] = {}
+    _prescan_extrinsic_values(root, value_map)
+
     header_log = apply_header_template(root, doc_meta=doc_meta)
-    element_log = anonymize_elements(root, active_profile)
+    element_log = anonymize_elements(root, active_profile, value_map)
     log = header_log + element_log
 
     output_bytes: bytes = lxml_ET.tostring(
@@ -1246,20 +1544,23 @@ def _render_summary_table(log: list[dict], filename: str, height_px: int = 400) 
         st.info("No substitutions were recorded for this file.")
         return
 
+    sorted_log = sorted(unique_log, key=lambda e: (_log_category(e), e.get("field", "")))
     data = [
         {
             "#": idx,
+            "Category": _log_category(entry),
             "Field": entry["field"],
             "Original Value": entry["original"] or "(empty)",
             "Anonymized Value": entry["anonymized"],
         }
-        for idx, entry in enumerate(unique_log, 1)
+        for idx, entry in enumerate(sorted_log, 1)
     ]
     st.dataframe(data, use_container_width=True, height=height_px, hide_index=True)
 
-    tsv_lines = ["#\tField\tOriginal Value\tAnonymized Value"]
-    for idx, entry in enumerate(unique_log, 1):
-        tsv_lines.append(f"{idx}\t{entry['field']}\t{entry['original']}\t{entry['anonymized']}")
+    tsv_lines = ["#\tCategory\tField\tOriginal Value\tAnonymized Value"]
+    for idx, entry in enumerate(sorted_log, 1):
+        cat = _log_category(entry)
+        tsv_lines.append(f"{idx}\t{cat}\t{entry['field']}\t{entry['original']}\t{entry['anonymized']}")
     tsv_text = "\n".join(tsv_lines)
 
     st.download_button(
@@ -1277,13 +1578,16 @@ def _render_summary_table(log: list[dict], filename: str, height_px: int = 400) 
 # ---------------------------------------------------------------------------
 
 def _inject_theme_css(dark: bool) -> None:
-    """Inject a single <style> block that sets all --tc-* CSS variables
-    and (in dark mode) overrides the Streamlit chrome so the entire app
-    is visually consistent across both modes.
+    """Inject a single <style> block that sets all CSS variables and component styles.
+
+    Uses a two-layer token system:
+    - --tc-* primitives (mode-specific raw values, used in inline badge styles)
+    - --sp-* semantic tokens (enterprise palette, used in component CSS classes)
     """
     if dark:
         vars_css = """
         :root {
+            /* Legacy tc primitives — unchanged for compatibility */
             --tc-bg-valid:              #0e4429;
             --tc-bg-invalid:            #4a1a1a;
             --tc-bg-warning:            #1a1a2e;
@@ -1296,6 +1600,18 @@ def _inject_theme_css(dark: bool) -> None:
             --tc-text-invalid:          #f85149;
             --tc-text-warning:          #faad14;
             --tc-text-service:          #79c0ff;
+
+            /* Enterprise semantic tokens — dark mode */
+            --sp-primary:               #3b82f6;
+            --sp-primary-hover:         #2563eb;
+            --sp-success:               #22c55e;
+            --sp-warning:               #f59e0b;
+            --sp-danger:                #f43f5e;
+            --sp-surface:               #0f172a;
+            --sp-surface-raised:        #1e293b;
+            --sp-border:                #334155;
+            --sp-text-primary:          #f1f5f9;
+            --sp-text-secondary:        #94a3b8;
         }
         """
         chrome_css = """
@@ -1399,6 +1715,7 @@ def _inject_theme_css(dark: bool) -> None:
     else:
         vars_css = """
         :root {
+            /* Legacy tc primitives — unchanged for compatibility */
             --tc-bg-valid:              #dafbe1;
             --tc-bg-invalid:            #ffebe9;
             --tc-bg-warning:            #fff8c5;
@@ -1411,10 +1728,21 @@ def _inject_theme_css(dark: bool) -> None:
             --tc-text-invalid:          #cf222e;
             --tc-text-warning:          #9a6700;
             --tc-text-service:          #0550ae;
+
+            /* Enterprise semantic tokens — light mode */
+            --sp-primary:               #1e40af;
+            --sp-primary-hover:         #1d3a9a;
+            --sp-success:               #15803d;
+            --sp-warning:               #b45309;
+            --sp-danger:                #be123c;
+            --sp-surface:               #f8fafc;
+            --sp-surface-raised:        #ffffff;
+            --sp-border:                #e2e8f0;
+            --sp-text-primary:          #0f172a;
+            --sp-text-secondary:        #475569;
         }
         """
-        # Light mode: Streamlit's own light theme (config.toml base=light) is correct;
-        # only add the expander overflow fix.
+        # Light mode: Streamlit's own light theme is correct; add expander overflow only.
         chrome_css = """
         div[data-testid="stExpander"] details div[data-testid="stMarkdownContainer"] {
             max-height: 300px;
@@ -1422,8 +1750,71 @@ def _inject_theme_css(dark: bool) -> None:
         }
         """
 
+    # Shared component styles (mode-independent; use semantic tokens set above)
+    shared_css = """
+    /* ---- Document type badges ---- */
+    .sp-badge {
+        display: inline-block;
+        border-radius: 6px;
+        padding: 0.35rem 0.65rem;
+        font-size: 0.82rem;
+        font-weight: 600;
+        line-height: 1.3;
+        text-align: center;
+        color: #ffffff;
+        margin-top: 0.25rem;
+        white-space: nowrap;
+        letter-spacing: 0.01em;
+    }
+    .sp-badge-detail {
+        display: block;
+        font-size: 0.72rem;
+        font-weight: 400;
+        opacity: 0.88;
+        margin-top: 2px;
+    }
+
+    /* ---- Upload empty state ---- */
+    .sp-upload-empty {
+        border: 2px dashed var(--sp-border, #e2e8f0);
+        border-radius: 10px;
+        padding: 2rem 1.5rem;
+        text-align: center;
+        color: var(--sp-text-secondary, #475569);
+        background-color: var(--sp-surface, #f8fafc);
+        margin-top: 0.75rem;
+    }
+    .sp-upload-empty .sp-upload-icon {
+        font-size: 2.2rem;
+        margin-bottom: 0.5rem;
+        opacity: 0.6;
+    }
+    .sp-upload-empty .sp-upload-hint {
+        font-size: 1rem;
+        font-weight: 500;
+        margin: 0 0 0.3rem;
+    }
+    .sp-upload-empty .sp-upload-sub {
+        font-size: 0.82rem;
+        opacity: 0.75;
+        margin: 0;
+    }
+
+    /* ---- CTA button overrides ---- */
+    /* Primary: "Anonymize / Preview" button — already uses type="primary" via Streamlit */
+    button[kind="primary"] {
+        background-color: var(--sp-primary, #1e40af) !important;
+        border-color: var(--sp-primary, #1e40af) !important;
+        font-weight: 600 !important;
+    }
+    button[kind="primary"]:hover {
+        background-color: var(--sp-primary-hover, #1d3a9a) !important;
+        border-color: var(--sp-primary-hover, #1d3a9a) !important;
+    }
+    """
+
     st.markdown(
-        f"<style>{vars_css}{chrome_css}</style>",
+        f"<style>{vars_css}{chrome_css}{shared_css}</style>",
         unsafe_allow_html=True,
     )
 
@@ -1456,81 +1847,12 @@ st.divider()
 
 # --- Sidebar ---
 with st.sidebar:
-    st.header("📖 Instructions")
     st.markdown(
-        """
-        1. **Upload** one or more cXML files using the file uploader.
-        2. Accepted formats: **.xml** and **.txt** containing cXML content.
-        3. Click **Anonymize All Documents**.
-        4. **Download** individual files or all as a ZIP.
-        5. Expand the **Processing Summary** to confirm what was anonymized.
-        """
+        "**How to use**\n"
+        "1. Upload cXML files above\n"
+        "2. Review the detected document type per file\n"
+        "3. Click **Anonymize All Documents**"
     )
-    st.divider()
-
-    st.header("🌍 Auto Country & Region Detection")
-    st.markdown(
-        """
-        Country and region are detected automatically using
-        (in priority order):
-
-        1. `isoCountryCode` on `<Country>` elements (majority-vote)
-        2. `currency` on `<Money>` elements
-        3. `<Country>` text content
-
-        **Regions:** APAC, NAMAR, EMEA, Japan, LATAM
-
-        Each detected country gets locale-accurate anonymized values
-        (postal code, currency, phone format). Countries without a
-        dedicated profile fall back to their region default.
-
-        Falls back to **Australia (APAC)** if no signal is found.
-        """
-    )
-    st.divider()
-
-    st.header("📋 Document Types")
-    st.markdown(
-        """
-        | Type | Detection |
-        |------|-----------|
-        | **New PO** | `type="new"` (default) |
-        | **Change PO** | `type="update"` or `orderVersion` > 1 |
-        | **Cancel PO** | `type="delete"` |
-        | **Order Confirmation** | `<ConfirmationRequest>` |
-        | **Ship Notice** | `<ShipNoticeRequest>` |
-        | **Invoice** | `<InvoiceDetailRequest>` |
-
-        Change and Cancel POs preserve the original `orderVersion`,
-        `type`, and `<DocumentReference>` during anonymization.
-        """
-    )
-    st.divider()
-
-    st.header("📦 Order Types")
-    st.markdown(
-        """
-        The `orderType` attribute is detected and preserved:
-
-        | Order Type | Related Attributes |
-        |------------|--------------------|
-        | **regular** | *(default — no extra attrs)* |
-        | **release** | `agreementID`, `agreementPayloadID` |
-        | **blanket** | `releaseRequired`, `parentAgreementID`, `parentAgreementPayloadID`, `effectiveDate`, `expirationDate` |
-        | **stockTransport** | *(no extra attrs)* |
-        | **stockTransportRelease** | *(no extra attrs)* |
-
-        ID/payload attributes are anonymized to placeholders;
-        flags and dates are preserved as-is.
-        """
-    )
-    st.divider()
-
-    st.header("🔄 Reset")
-    if st.button("🗑️ Clear All Files", use_container_width=True):
-        st.session_state.clear_trigger += 1
-        st.rerun()
-
     st.divider()
 
     st.header("🎨 Appearance")
@@ -1545,12 +1867,75 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    st.info(
-        "🔐 **Privacy Notice**\n\n"
-        "Uploaded files are processed entirely in-memory within your "
-        "session and are never stored, logged, or transmitted to any "
-        "third party. No data is retained after your session ends."
-    )
+
+    st.header("🔄 Reset")
+    if st.button("🗑️ Clear All Files", use_container_width=True):
+        st.session_state.clear_trigger += 1
+        st.rerun()
+
+    st.divider()
+
+    with st.expander("📋 Document & Order Types"):
+        st.markdown(
+            """
+            **Document Types**
+
+            | Type | Detection |
+            |------|-----------|
+            | **New PO** | `type="new"` (default) |
+            | **Change PO** | `type="update"` or `orderVersion` > 1 |
+            | **Cancel PO** | `type="delete"` |
+            | **Order Confirmation** | `<ConfirmationRequest>` |
+            | **Ship Notice** | `<ShipNoticeRequest>` |
+            | **Invoice** | `<InvoiceDetailRequest>` |
+
+            Change and Cancel POs preserve the original `orderVersion`,
+            `type`, and `<DocumentReference>` during anonymization.
+
+            ---
+
+            **Order Types**
+
+            The `orderType` attribute is detected and preserved:
+
+            | Order Type | Related Attributes |
+            |------------|--------------------|
+            | **regular** | *(default)* |
+            | **release** | `agreementID`, `agreementPayloadID` |
+            | **blanket** | `releaseRequired`, `parentAgreementID`, `parentAgreementPayloadID`, `effectiveDate`, `expirationDate` |
+            | **stockTransport** | *(no extra attrs)* |
+            | **stockTransportRelease** | *(no extra attrs)* |
+
+            ID/payload attributes are anonymized; flags and dates are preserved.
+            """
+        )
+
+    with st.expander("🌍 Auto-Detection Explained"):
+        st.markdown(
+            """
+            Country and region are detected automatically using
+            (in priority order):
+
+            1. `isoCountryCode` on `<Country>` elements (majority-vote)
+            2. `currency` on `<Money>` elements
+            3. `<Country>` text content
+
+            **Regions:** APAC, NAMAR, EMEA, Japan, LATAM
+
+            Each detected country gets locale-accurate anonymized values
+            (postal code, currency, phone format). Countries without a
+            dedicated profile fall back to their region default.
+
+            Falls back to **Australia (APAC)** if no signal is found.
+            """
+        )
+
+    with st.expander("🔐 Privacy & Security"):
+        st.markdown(
+            "Uploaded files are processed entirely in-memory within your "
+            "session and are never stored, logged, or transmitted to any "
+            "third party. No data is retained after your session ends."
+        )
 
 # --- File uploader ---
 uploader_key = f"file_uploader_{st.session_state.clear_trigger}"
@@ -1564,7 +1949,16 @@ uploaded_files = st.file_uploader(
 )
 
 if not uploaded_files:
-    st.info("👆 Please upload one or more cXML files to get started. Accepted formats: .xml and .txt")
+    st.markdown(
+        """
+        <div class="sp-upload-empty">
+            <div class="sp-upload-icon">📂</div>
+            <p class="sp-upload-hint">Drop cXML files here or use the uploader above</p>
+            <p class="sp-upload-sub">Supports PO, Invoice, Ship Notice &nbsp;·&nbsp; Max 50 files &nbsp;·&nbsp; 10 MB each</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.stop()
 
 oversized = [f.name for f in uploaded_files if len(f.getvalue()) > MAX_FILE_SIZE_MB * 1024 * 1024]
@@ -1658,68 +2052,57 @@ for i, uploaded_file in enumerate(uploaded_files):
 
         with col3:
             if is_valid:
-                safe_doc_label = _html.escape(doc_meta.display_label if doc_meta else "")
-
+                # Determine badge label and solid enterprise color based on doc type.
+                # All enterprise badges use white text on solid backgrounds (WCAG ≥4.5:1).
                 if doc_meta and doc_meta.is_change_po:
-                    badge_bg = "var(--tc-bg-warning)"
-                    badge_border = "#d29922"
-                    badge_text_color = "var(--tc-text-warning)"
-                    badge_icon = "🔄"
+                    badge_label = "▲ Change PO"
+                    badge_color = "#b45309"
                 elif doc_meta and doc_meta.is_cancel_po:
-                    badge_bg = "var(--tc-bg-invalid)"
-                    badge_border = "var(--tc-border-invalid)"
-                    badge_text_color = "var(--tc-text-invalid)"
-                    badge_icon = "🚫"
+                    badge_label = "✕ Cancel PO"
+                    badge_color = "#be123c"
+                elif doc_meta and doc_meta.base_type == "Invoice":
+                    badge_label = "◆ Invoice"
+                    badge_color = "#15803d"
+                elif doc_meta and doc_meta.base_type == "ShipNotice":
+                    badge_label = "→ Ship Notice"
+                    badge_color = "#0d9488"
+                elif doc_meta and doc_meta.base_type == "OrderConfirmation":
+                    badge_label = "✓ Confirmation"
+                    badge_color = "#6d28d9"
+                elif doc_meta and doc_meta.base_type == "Response":
+                    badge_label = "↩ Response"
+                    badge_color = "#0550ae"
+                elif doc_meta and doc_meta.base_type == "Request (Other)":
+                    badge_label = "~ Request"
+                    badge_color = "#475569"
                 elif doc_meta and doc_meta.is_service_po:
-                    badge_bg = "var(--tc-bg-service)"
-                    badge_border = "#0550ae"
-                    badge_text_color = "var(--tc-text-service)"
-                    badge_icon = "🔧"
+                    badge_label = "● Service PO"
+                    badge_color = "#0550ae"
+                elif doc_meta and doc_meta.base_type == "OrderRequest":
+                    badge_label = "● New PO"
+                    badge_color = "#1e40af"
                 else:
-                    badge_bg = "var(--tc-bg-valid)"
-                    badge_border = "var(--tc-border-valid)"
-                    badge_text_color = "var(--tc-text-valid)"
-                    badge_icon = "✅"
+                    badge_label = "? Other"
+                    badge_color = "#475569"
 
-                detail_line = ""
                 detail_parts: list[str] = []
                 if doc_meta and doc_meta.is_change_po and doc_meta.order_version:
                     detail_parts.append(f"v{_html.escape(doc_meta.order_version)}")
                 if doc_meta and doc_meta.order_type_label:
                     detail_parts.append(_html.escape(doc_meta.order_type_label))
-                if detail_parts:
-                    detail_line = (
-                        f"<br><span style='font-size:0.75rem;'>"
-                        f"{' | '.join(detail_parts)}</span>"
-                    )
+                detail_html = (
+                    f'<span class="sp-badge-detail">{" | ".join(detail_parts)}</span>'
+                    if detail_parts else ""
+                )
 
                 st.markdown(
-                    f"<div style='"
-                    f"background-color: {badge_bg};"
-                    f"border: 1px solid {badge_border};"
-                    f"border-radius: 6px;"
-                    f"padding: 0.35rem 0.6rem;"
-                    f"text-align: center;"
-                    f"font-size: 0.85rem;"
-                    f"color: {badge_text_color};"
-                    f"line-height: 1.3;"
-                    f"margin-top: 0.25rem;"
-                    f"'>{badge_icon} {safe_doc_label}{detail_line}</div>",
+                    f'<div class="sp-badge" style="background-color:{badge_color};">'
+                    f"{_html.escape(badge_label)}{detail_html}</div>",
                     unsafe_allow_html=True,
                 )
             else:
                 st.markdown(
-                    "<div style='"
-                    "background-color: var(--tc-bg-invalid);"
-                    "border: 1px solid var(--tc-border-invalid);"
-                    "border-radius: 6px;"
-                    "padding: 0.35rem 0.6rem;"
-                    "text-align: center;"
-                    "font-size: 0.85rem;"
-                    "color: var(--tc-text-invalid);"
-                    "line-height: 1.3;"
-                    "margin-top: 0.25rem;"
-                    "'>❌ Invalid</div>",
+                    '<div class="sp-badge" style="background-color:#be123c;">✕ Invalid</div>',
                     unsafe_allow_html=True,
                 )
                 validation_errors.append(
@@ -1801,7 +2184,7 @@ status_text = st.empty()
 
 for i, config in enumerate(file_configs):
     file = config["file"]
-    status_text.text(f"{'Previewing' if dry_run else 'Processing'} {file.name}…")
+    status_text.caption(f"{'Previewing' if dry_run else 'Processing'} {file.name}… ({i + 1}/{len(file_configs)})")
 
     try:
         xml_content = config["xml_content"]

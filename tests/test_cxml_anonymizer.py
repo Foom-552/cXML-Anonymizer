@@ -348,3 +348,404 @@ def test_process_cxml_content_removes_buyer_identity():
     result_xml, _log, *_ = process_cxml_content(MINIMAL_CXML, country_code="AU", region_code="APAC", detection_method="test")
     assert "buyer-id" not in result_xml
     assert "#SENDERID#" in result_xml or "#RECEIVERID#" in result_xml
+
+
+# ---------------------------------------------------------------------------
+# Value Consistency Engine — Extrinsic ↔ IdReference cross-reference
+# ---------------------------------------------------------------------------
+
+_CONSISTENCY_CXML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<cXML payloadID="inv-001@test.example.com" timestamp="2024-01-01T00:00:00Z" version="1.2.014">
+  <Header>
+    <From><Credential domain="NetworkId"><Identity>buyer</Identity></Credential></From>
+    <To><Credential domain="NetworkId"><Identity>supplier</Identity></Credential></To>
+    <Sender><Credential domain="NetworkID"><Identity>provider</Identity></Credential></Sender>
+  </Header>
+  <Request>
+    <InvoiceDetailRequest>
+      <InvoiceDetailRequestHeader invoiceID="INV-001" invoiceDate="2024-01-01"
+          operation="new" purpose="standard">
+        <InvoicePartner>
+          <Contact role="buyerCorporate">
+            <IdReference identifier="MR85000769" domain="vatID"/>
+          </Contact>
+        </InvoicePartner>
+        <Extrinsic name="buyerVatID">MR85000769</Extrinsic>
+      </InvoiceDetailRequestHeader>
+    </InvoiceDetailRequest>
+  </Request>
+</cXML>"""
+
+
+def test_consistency_same_vat_in_extrinsic_and_idref():
+    """A VAT ID appearing in both an Extrinsic and an IdReference should produce
+    the same anonymized placeholder in the output document."""
+    result_xml, _log, *_ = process_cxml_content(
+        _CONSISTENCY_CXML, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    assert "MR85000769" not in result_xml, "Real VAT ID must be removed"
+    # The Extrinsic maps buyerVatID → "Buyer ABN"; the IdReference must inherit that value.
+    root = lxml_ET.fromstring(result_xml.encode())
+    extrinsic = root.find(".//{*}Extrinsic[@name='buyerVatID']")
+    id_ref = root.find(".//{*}IdReference[@domain='vatID']")
+    assert extrinsic is not None and id_ref is not None
+    assert extrinsic.text == id_ref.get("identifier"), (
+        f"Extrinsic ({extrinsic.text!r}) and IdReference ({id_ref.get('identifier')!r}) "
+        "must have the same anonymized value"
+    )
+
+
+def test_consistency_per_file_isolation():
+    """Two calls to process_cxml_content on the same XML must produce independent
+    value maps — i.e., results are deterministic but not shared across calls."""
+    args = {"country_code": "AU", "region_code": "APAC", "detection_method": "test"}
+    xml1, _log1, *_ = process_cxml_content(_CONSISTENCY_CXML, **args)
+    xml2, _log2, *_ = process_cxml_content(_CONSISTENCY_CXML, **args)
+    # Both results should be identical (deterministic map entries from the same source)
+    root1 = lxml_ET.fromstring(xml1.encode())
+    root2 = lxml_ET.fromstring(xml2.encode())
+    ext1 = root1.find(".//{*}Extrinsic[@name='buyerVatID']")
+    ext2 = root2.find(".//{*}Extrinsic[@name='buyerVatID']")
+    assert ext1 is not None and ext2 is not None
+    assert ext1.text == ext2.text
+
+
+# ---------------------------------------------------------------------------
+# invoiceSourceDocument — must be preserved (structural classifier, not PII)
+# ---------------------------------------------------------------------------
+
+_INV_SOURCE_DOC_CXML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<cXML payloadID="inv-002@test.example.com" timestamp="2024-01-01T00:00:00Z" version="1.2.014">
+  <Header>
+    <From><Credential domain="NetworkId"><Identity>buyer</Identity></Credential></From>
+    <To><Credential domain="NetworkId"><Identity>supplier</Identity></Credential></To>
+    <Sender><Credential domain="NetworkID"><Identity>provider</Identity></Credential></Sender>
+  </Header>
+  <Request>
+    <InvoiceDetailRequest>
+      <InvoiceDetailRequestHeader invoiceID="INV-002" invoiceDate="2024-01-01"
+          operation="new" purpose="standard">
+        <Extrinsic name="invoiceSourceDocument">PurchaseOrder</Extrinsic>
+        <Extrinsic name="invoiceType">standard</Extrinsic>
+      </InvoiceDetailRequestHeader>
+    </InvoiceDetailRequest>
+  </Request>
+</cXML>"""
+
+
+def test_extrinsic_invoiceSourceDocument_preserved():
+    """invoiceSourceDocument is a structural classifier and must not be anonymized."""
+    result_xml, _log, *_ = process_cxml_content(
+        _INV_SOURCE_DOC_CXML, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    root = lxml_ET.fromstring(result_xml.encode())
+    ext = root.find(".//{*}Extrinsic[@name='invoiceSourceDocument']")
+    assert ext is not None
+    assert ext.text == "PurchaseOrder", (
+        f"invoiceSourceDocument must be preserved unchanged, got {ext.text!r}"
+    )
+
+
+def test_extrinsic_invoiceType_preserved():
+    """invoiceType ('standard', 'creditNote') is structural metadata and must not be anonymized."""
+    result_xml, _log, *_ = process_cxml_content(
+        _INV_SOURCE_DOC_CXML, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    root = lxml_ET.fromstring(result_xml.encode())
+    ext = root.find(".//{*}Extrinsic[@name='invoiceType']")
+    assert ext is not None
+    assert ext.text == "standard"
+
+
+# ---------------------------------------------------------------------------
+# invoicePDF structural Extrinsic — child URL elements must be anonymized
+# ---------------------------------------------------------------------------
+
+_INVOICE_PDF_CID_CXML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<cXML payloadID="inv-003@test.example.com" timestamp="2024-01-01T00:00:00Z" version="1.2.014">
+  <Header>
+    <From><Credential domain="NetworkId"><Identity>buyer</Identity></Credential></From>
+    <To><Credential domain="NetworkId"><Identity>supplier</Identity></Credential></To>
+    <Sender><Credential domain="NetworkID"><Identity>provider</Identity></Credential></Sender>
+  </Header>
+  <Request>
+    <InvoiceDetailRequest>
+      <InvoiceDetailRequestHeader invoiceID="INV-003" invoiceDate="2024-01-01"
+          operation="new" purpose="standard">
+        <Extrinsic name="invoicePDF">
+          <Attachment>
+            <URL>cid:1280686519.12345@cxml.org</URL>
+          </Attachment>
+        </Extrinsic>
+      </InvoiceDetailRequestHeader>
+    </InvoiceDetailRequest>
+  </Request>
+</cXML>"""
+
+_INVOICE_PDF_HTTPS_CXML = _INVOICE_PDF_CID_CXML.replace(
+    "cid:1280686519.12345@cxml.org", "https://real-company.example.com/invoice.pdf"
+)
+
+
+def test_extrinsic_invoicePDF_cid_anonymized():
+    """CID attachment URLs inside an invoicePDF Extrinsic must be replaced with the
+    canonical cid:anonymized@cxml.org placeholder."""
+    result_xml, _log, *_ = process_cxml_content(
+        _INVOICE_PDF_CID_CXML, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    assert "cid:1280686519.12345@cxml.org" not in result_xml
+    assert "cid:anonymized@cxml.org" in result_xml
+
+
+def test_extrinsic_invoicePDF_https_anonymized():
+    """HTTPS attachment URLs inside an invoicePDF Extrinsic must be replaced with
+    https://anonymized.example.com."""
+    result_xml, _log, *_ = process_cxml_content(
+        _INVOICE_PDF_HTTPS_CXML, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    assert "real-company.example.com" not in result_xml
+    assert "https://anonymized.example.com" in result_xml
+
+
+# ---------------------------------------------------------------------------
+# New Extrinsic field mappings
+# ---------------------------------------------------------------------------
+
+def _make_extrinsic_cxml(*name_value_pairs: tuple[str, str]) -> str:
+    """Build a minimal cXML with the given Extrinsic name/value pairs for testing."""
+    extrinsics = "".join(
+        f'        <Extrinsic name="{name}">{value}</Extrinsic>\n'
+        for name, value in name_value_pairs
+    )
+    return f"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<cXML payloadID="ext-test@test.example.com" timestamp="2024-01-01T00:00:00Z" version="1.2.014">
+  <Header>
+    <From><Credential domain="NetworkId"><Identity>buyer</Identity></Credential></From>
+    <To><Credential domain="NetworkId"><Identity>supplier</Identity></Credential></To>
+    <Sender><Credential domain="NetworkID"><Identity>provider</Identity></Credential></Sender>
+  </Header>
+  <Request>
+    <InvoiceDetailRequest>
+      <InvoiceDetailRequestHeader invoiceID="INV-EXT" invoiceDate="2024-01-01"
+          operation="new" purpose="standard">
+{extrinsics}      </InvoiceDetailRequestHeader>
+    </InvoiceDetailRequest>
+  </Request>
+</cXML>"""
+
+
+def test_new_extrinsic_banking_fields():
+    """Banking Extrinsic fields (iban, swiftCode, bankAccountNumber) must be replaced."""
+    xml = _make_extrinsic_cxml(
+        ("iban", "DE89370400440532013000"),
+        ("swiftCode", "DEUTDEDB"),
+        ("bankAccountNumber", "12345678"),
+    )
+    result_xml, _log, *_ = process_cxml_content(
+        xml, country_code="DE", region_code="EMEA", detection_method="test"
+    )
+    assert "DE89370400440532013000" not in result_xml
+    assert "DEUTDEDB" not in result_xml
+    assert "12345678" not in result_xml
+    assert "ANON-IBAN" in result_xml
+    assert "ANONBICX" in result_xml
+    assert "ANON-BANK-ACCT" in result_xml
+
+
+def test_new_extrinsic_legal_fields():
+    """Legal entity Extrinsic fields must be replaced with anonymized placeholders."""
+    xml = _make_extrinsic_cxml(
+        ("legalEntityName", "Real Company GmbH"),
+        ("legalEntityID", "HRB-123456"),
+    )
+    result_xml, _log, *_ = process_cxml_content(
+        xml, country_code="DE", region_code="EMEA", detection_method="test"
+    )
+    assert "Real Company GmbH" not in result_xml
+    assert "HRB-123456" not in result_xml
+    assert "Anonymized Legal Entity" in result_xml
+    assert "ANON-LEGAL-ID" in result_xml
+
+
+def test_new_extrinsic_invoice_doc_refs():
+    """Invoice document reference Extrinsic fields must be replaced."""
+    xml = _make_extrinsic_cxml(
+        ("invoiceNumber", "INV-2024-001"),
+        ("deliveryNoteNo", "DN-98765"),
+    )
+    result_xml, _log, *_ = process_cxml_content(
+        xml, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    assert "INV-2024-001" not in result_xml
+    assert "DN-98765" not in result_xml
+    assert "ANON-INVOICE-NO" in result_xml
+    assert "ANON-DELIVERY-NO" in result_xml
+
+
+def test_new_extrinsic_invoice_contacts():
+    """Invoice contact Extrinsic fields must be replaced with anonymized placeholders."""
+    xml = _make_extrinsic_cxml(
+        ("submitterEmail", "john.doe@real-company.com"),
+        ("submitterName", "John Doe"),
+    )
+    result_xml, _log, *_ = process_cxml_content(
+        xml, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    assert "john.doe@real-company.com" not in result_xml
+    assert "John Doe" not in result_xml
+    assert "submitter@anonymized.com" in result_xml
+    assert "Anonymized Submitter" in result_xml
+
+
+# ---------------------------------------------------------------------------
+# Substitution log — Category column
+# ---------------------------------------------------------------------------
+
+def test_substitution_log_has_category_column():
+    """Every entry in the substitution log must be passable to _log_category()
+    and produce a non-empty string result."""
+    from cxml_anonymizer import _log_category
+    _result_xml, log, *_ = process_cxml_content(
+        MINIMAL_CXML, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    assert log, "Log must not be empty"
+    for entry in log:
+        cat = _log_category(entry)
+        assert isinstance(cat, str) and cat, (
+            f"_log_category returned {cat!r} for entry {entry!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Distinct profile-field anonymization (Name, Email, Number, Street)
+# ---------------------------------------------------------------------------
+
+def _two_contact_cxml(number1: str, number2: str, name1: str = "Acme Corp",
+                      name2: str = "Different Corp", email1: str = "",
+                      email2: str = "") -> str:
+    """Minimal cXML with ShipTo and BillTo contacts carrying the given values."""
+    email_block1 = f"<Email>{email1}</Email>" if email1 else ""
+    email_block2 = f"<Email>{email2}</Email>" if email2 else ""
+    return f"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<cXML payloadID="tc@test.example.com" timestamp="2024-01-01T00:00:00Z" version="1.2.014">
+  <Header>
+    <From><Credential domain="NetworkId"><Identity>b</Identity></Credential></From>
+    <To><Credential domain="NetworkId"><Identity>s</Identity></Credential></To>
+    <Sender><Credential domain="NetworkID"><Identity>p</Identity></Credential></Sender>
+  </Header>
+  <Request>
+    <OrderRequest>
+      <OrderRequestHeader orderID="PO-1" orderDate="2024-01-01" type="new">
+        <Total><Money currency="AUD">100.00</Money></Total>
+        <ShipTo>
+          <Address>
+            <Name xml:lang="en">{name1}</Name>
+            <PostalAddress>
+              <Country isoCountryCode="AU">Australia</Country>
+            </PostalAddress>
+            {email_block1}
+            <Phone>
+              <TelephoneNumber>
+                <CountryCode isoCountryCode="AU">61</CountryCode>
+                <AreaOrCityCode>8</AreaOrCityCode>
+                <Number>{number1}</Number>
+              </TelephoneNumber>
+            </Phone>
+          </Address>
+        </ShipTo>
+        <BillTo>
+          <Address>
+            <Name xml:lang="en">{name2}</Name>
+            <PostalAddress>
+              <Country isoCountryCode="AU">Australia</Country>
+            </PostalAddress>
+            {email_block2}
+            <Phone>
+              <TelephoneNumber>
+                <CountryCode isoCountryCode="AU">61</CountryCode>
+                <AreaOrCityCode>8</AreaOrCityCode>
+                <Number>{number2}</Number>
+              </TelephoneNumber>
+            </Phone>
+          </Address>
+        </BillTo>
+      </OrderRequestHeader>
+    </OrderRequest>
+  </Request>
+</cXML>"""
+
+
+def test_two_different_numbers_get_distinct_anonymized_values():
+    """Two different original phone numbers must produce two different anonymized values."""
+    xml = _two_contact_cxml("65418630", "65421197")
+    result_xml, _log, *_ = process_cxml_content(
+        xml, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    assert "65418630" not in result_xml
+    assert "65421197" not in result_xml
+    root = lxml_ET.fromstring(result_xml.encode())
+    numbers = [el.text for el in root.iter()
+               if lxml_ET.QName(el.tag).localname == "Number" and el.text]
+    assert len(numbers) == 2, f"Expected 2 <Number> elements, found {numbers}"
+    assert numbers[0] != numbers[1], (
+        f"Two different original numbers must produce distinct anonymized values, got {numbers}"
+    )
+
+
+def test_same_number_appears_twice_gets_consistent_value():
+    """The same original phone number in two contacts must anonymize to the same value."""
+    xml = _two_contact_cxml("65418630", "65418630")
+    result_xml, _log, *_ = process_cxml_content(
+        xml, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    root = lxml_ET.fromstring(result_xml.encode())
+    numbers = [el.text for el in root.iter()
+               if lxml_ET.QName(el.tag).localname == "Number" and el.text]
+    assert len(numbers) == 2, f"Expected 2 <Number> elements, found {numbers}"
+    assert numbers[0] == numbers[1], (
+        f"The same original number must anonymize consistently, got {numbers}"
+    )
+
+
+def test_two_different_names_get_distinct_values():
+    """Two different original <Name> elements must produce distinct anonymized values."""
+    xml = _two_contact_cxml("11111111", "22222222",
+                            name1="Real Company A", name2="Real Company B")
+    result_xml, _log, *_ = process_cxml_content(
+        xml, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    assert "Real Company A" not in result_xml
+    assert "Real Company B" not in result_xml
+    root = lxml_ET.fromstring(result_xml.encode())
+    names = [el.text for el in root.iter()
+             if lxml_ET.QName(el.tag).localname == "Name" and el.text]
+    assert len(set(names)) >= 2, (
+        f"Two different original names must produce distinct anonymized values, got {names}"
+    )
+
+
+def test_two_different_emails_get_distinct_values():
+    """Two different original <Email> elements must produce distinct anonymized values."""
+    xml = _two_contact_cxml(
+        "11111111", "22222222",
+        email1="alice@realcompany.com",
+        email2="bob@anothercompany.com",
+    )
+    result_xml, _log, *_ = process_cxml_content(
+        xml, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    assert "alice@realcompany.com" not in result_xml
+    assert "bob@anothercompany.com" not in result_xml
+    root = lxml_ET.fromstring(result_xml.encode())
+    emails = [el.text for el in root.iter()
+              if lxml_ET.QName(el.tag).localname == "Email" and el.text]
+    assert len(emails) == 2, f"Expected 2 <Email> elements, found {emails}"
+    assert emails[0] != emails[1], (
+        f"Two different original emails must produce distinct values, got {emails}"
+    )
+
