@@ -671,7 +671,7 @@ def _log_category(entry: dict) -> str:
         return "Header"
 
     # Service period date entries
-    if field.startswith("<Period"):
+    if field.startswith("<Period") or field.startswith("<ItemOut requestedDeliveryDate"):
         return "Service Period"
 
     # Financial entries (Money amounts / currencies)
@@ -826,22 +826,35 @@ def _replace_date_today(date_str: str) -> str:
     return f"{datetime.now().strftime('%Y-%m-%d')}{m.group(1)}{m.group(2)}"
 
 
-def _shift_date_10y(date_str: str) -> str:
-    """Shift a cXML ISO 8601 date string's year +10, preserving month/day/time/tz.
+def _shift_date_100y(date_str: str) -> str:
+    """Shift a cXML ISO 8601 date string's year +100, preserving month/day/time/tz.
     Handles Feb 29 → Feb 28 when the target year is not a leap year.
     Returns date_str unchanged if the format is unrecognised.
     """
-    m = re.match(r"^(\d{4})(-\d{2})(-\d{2})(T\d{2}:\d{2}:\d{2})(.*)", date_str)
+    m = re.match(r"^(\d{4})(-\d{2})(-\d{2})(.*)", date_str)
     if not m:
         return date_str
     year, month, day = int(m.group(1)), m.group(2), m.group(3)
-    time_part, tz_part = m.group(4), m.group(5)
-    new_year = year + 10
+    rest = m.group(4)
+    new_year = year + 100
     if month == "-02" and day == "-29":
         is_leap = (new_year % 4 == 0 and new_year % 100 != 0) or (new_year % 400 == 0)
         if not is_leap:
             day = "-28"
-    return f"{new_year}{month}{day}{time_part}{tz_part}"
+    return f"{new_year}{month}{day}{rest}"
+
+
+def _date_yesterday(date_str: str) -> str:
+    """Replace the date part of a cXML ISO 8601 datetime with yesterday's date,
+    preserving the original time component and timezone offset.
+    Returns date_str unchanged if the format is unrecognised.
+    """
+    from datetime import timedelta
+    m = re.match(r"^\d{4}-\d{2}-\d{2}(.*)", date_str)
+    if not m:
+        return date_str
+    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    return f"{yesterday}{m.group(1)}"
 
 
 # ---------------------------------------------------------------------------
@@ -1192,6 +1205,23 @@ def apply_header_template(root: lxml_ET._Element, doc_meta: DocumentMeta | None 
                         "anonymized": f"(preserved — {current_order_type})",
                     })
 
+            # Blanket PO date adjustments per Test Central guidance:
+            # effectiveDate → yesterday, expirationDate → year +100
+            if current_order_type == "blanket":
+                for attr, transform, label in [
+                    ("effectiveDate", _date_yesterday, "effectiveDate (blanket)"),
+                    ("expirationDate", _shift_date_100y, "expirationDate (blanket)"),
+                ]:
+                    old_val = orh.get(attr)
+                    if old_val is not None:
+                        new_val = transform(old_val)
+                        orh.set(attr, new_val)
+                        log.append({
+                            "field": f"<OrderRequestHeader {label}>",
+                            "original": old_val,
+                            "anonymized": new_val,
+                        })
+
             doc_ref = orh.find("DocumentReference")
             if doc_ref is not None:
                 if preserve_po_attrs:
@@ -1382,11 +1412,11 @@ def anonymize_elements(
                     value_map[old_text.strip()] = anonymized_value
 
         # Service period date anonymization — all <Period> elements in document.
-        # startDate → today's run date (time/tz preserved); endDate → year +10.
+        # startDate → today's run date (time/tz preserved); endDate → year +100.
         if local_tag == "Period":
             for attr, transform in [
                 ("startDate", _replace_date_today),
-                ("endDate", _shift_date_10y),
+                ("endDate", _shift_date_100y),
             ]:
                 old_val = child.get(attr)
                 if old_val is not None:
@@ -1397,6 +1427,18 @@ def anonymize_elements(
                         "original": old_val,
                         "anonymized": new_val,
                     })
+
+        # requestedDeliveryDate on <ItemOut> → year +100 (Test Central requirement)
+        if local_tag == "ItemOut":
+            old_val = child.get("requestedDeliveryDate")
+            if old_val is not None:
+                new_val = _shift_date_100y(old_val)
+                child.set("requestedDeliveryDate", new_val)
+                log.append({
+                    "field": "<ItemOut requestedDeliveryDate>",
+                    "original": old_val,
+                    "anonymized": new_val,
+                })
 
         # IdReference identifiers — use value_map for cross-reference consistency
         if local_tag == "IdReference" and "identifier" in child.attrib:

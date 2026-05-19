@@ -3,6 +3,7 @@
 Run with: pytest tests/
 """
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -748,4 +749,148 @@ def test_two_different_emails_get_distinct_values():
     assert emails[0] != emails[1], (
         f"Two different original emails must produce distinct values, got {emails}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Date anonymization — Test Central alignment
+# ---------------------------------------------------------------------------
+
+_PERIOD_CXML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<cXML payloadID="period-001@buyer.example.com" timestamp="2024-01-01T00:00:00Z" version="1.2.014">
+  <Header>
+    <From><Credential domain="NetworkId"><Identity>buyer-id</Identity></Credential></From>
+    <To><Credential domain="NetworkId"><Identity>supplier-id</Identity></Credential></To>
+    <Sender><Credential domain="NetworkID"><Identity>provider-id</Identity></Credential></Sender>
+  </Header>
+  <Request>
+    <OrderRequest>
+      <OrderRequestHeader orderID="SVC-001" orderDate="2024-01-01" type="new">
+        <Total><Money currency="USD">500.00</Money></Total>
+        <ShipTo>
+          <Address>
+            <Name xml:lang="en">Test Co</Name>
+            <PostalAddress>
+              <Country isoCountryCode="US">United States</Country>
+            </PostalAddress>
+          </Address>
+        </ShipTo>
+        <SpendDetail>
+          <ServicePeriod><Period startDate="2024-01-15T00:00:00-05:00" endDate="2024-12-31T23:59:59-05:00"/></ServicePeriod>
+        </SpendDetail>
+      </OrderRequestHeader>
+    </OrderRequest>
+  </Request>
+</cXML>"""
+
+_ITEM_OUT_CXML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<cXML payloadID="itemout-001@buyer.example.com" timestamp="2024-01-01T00:00:00Z" version="1.2.014">
+  <Header>
+    <From><Credential domain="NetworkId"><Identity>buyer-id</Identity></Credential></From>
+    <To><Credential domain="NetworkId"><Identity>supplier-id</Identity></Credential></To>
+    <Sender><Credential domain="NetworkID"><Identity>provider-id</Identity></Credential></Sender>
+  </Header>
+  <Request>
+    <OrderRequest>
+      <OrderRequestHeader orderID="PO-DATE-001" orderDate="2024-01-01" type="new">
+        <Total><Money currency="USD">100.00</Money></Total>
+        <ShipTo>
+          <Address>
+            <Name xml:lang="en">Test Co</Name>
+            <PostalAddress>
+              <Country isoCountryCode="US">United States</Country>
+            </PostalAddress>
+          </Address>
+        </ShipTo>
+      </OrderRequestHeader>
+      <ItemOut quantity="1" requestedDeliveryDate="2024-06-01T00:00:00-05:00" lineNumber="1">
+        <ItemID><SupplierPartID>PART-001</SupplierPartID></ItemID>
+      </ItemOut>
+    </OrderRequest>
+  </Request>
+</cXML>"""
+
+_BLANKET_CXML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<cXML payloadID="blanket-001@buyer.example.com" timestamp="2024-01-01T00:00:00Z" version="1.2.014">
+  <Header>
+    <From><Credential domain="NetworkId"><Identity>buyer-id</Identity></Credential></From>
+    <To><Credential domain="NetworkId"><Identity>supplier-id</Identity></Credential></To>
+    <Sender><Credential domain="NetworkID"><Identity>provider-id</Identity></Credential></Sender>
+  </Header>
+  <Request>
+    <OrderRequest>
+      <OrderRequestHeader orderID="PO-BLANKET-001" orderDate="2024-01-01" type="new"
+          orderType="blanket"
+          effectiveDate="2024-01-01T00:00:00-05:00" expirationDate="2025-01-01T00:00:00-05:00">
+        <Total><Money currency="USD">10000.00</Money></Total>
+        <ShipTo>
+          <Address>
+            <Name xml:lang="en">Test Co</Name>
+            <PostalAddress>
+              <Country isoCountryCode="US">United States</Country>
+            </PostalAddress>
+          </Address>
+        </ShipTo>
+      </OrderRequestHeader>
+    </OrderRequest>
+  </Request>
+</cXML>"""
+
+
+def test_service_period_enddate_shifted_100y():
+    """ServicePeriod <Period endDate> must be shifted forward by 100 years."""
+    result_xml, _log, *_ = process_cxml_content(
+        _PERIOD_CXML, country_code="US", region_code="NA", detection_method="test"
+    )
+    root = lxml_ET.fromstring(result_xml.encode())
+    period = root.find(".//{*}Period")
+    assert period is not None, "<Period> element not found in output"
+    end_date = period.get("endDate", "")
+    assert end_date.startswith("2124-"), (
+        f"<Period endDate> should be year 2124 after +100y shift, got: {end_date!r}"
+    )
+
+
+def test_requested_delivery_date_shifted_100y():
+    """requestedDeliveryDate on <ItemOut> must be shifted forward by 100 years."""
+    result_xml, _log, *_ = process_cxml_content(
+        _ITEM_OUT_CXML, country_code="US", region_code="NA", detection_method="test"
+    )
+    root = lxml_ET.fromstring(result_xml.encode())
+    item_out = root.find(".//{*}ItemOut")
+    assert item_out is not None, "<ItemOut> element not found in output"
+    rdd = item_out.get("requestedDeliveryDate", "")
+    assert rdd.startswith("2124-"), (
+        f"requestedDeliveryDate should be year 2124 after +100y shift, got: {rdd!r}"
+    )
+
+
+def test_blanket_effective_date_is_yesterday():
+    """effectiveDate on a blanket PO header must be replaced with yesterday's date."""
+    root = _parse(_BLANKET_CXML)
+    _is_valid, _msg, meta = validate_cxml_file(_BLANKET_CXML)
+    apply_header_template(root, doc_meta=meta)
+    orh = root.find(".//{*}OrderRequestHeader")
+    assert orh is not None
+    effective = orh.get("effectiveDate", "")
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    assert effective.startswith(yesterday), (
+        f"effectiveDate should start with yesterday ({yesterday}), got: {effective!r}"
+    )
+
+
+def test_blanket_expiration_date_shifted_100y():
+    """expirationDate on a blanket PO header must be shifted forward by 100 years."""
+    root = _parse(_BLANKET_CXML)
+    _is_valid, _msg, meta = validate_cxml_file(_BLANKET_CXML)
+    apply_header_template(root, doc_meta=meta)
+    orh = root.find(".//{*}OrderRequestHeader")
+    assert orh is not None
+    expiry = orh.get("expirationDate", "")
+    assert expiry.startswith("2125-"), (
+        f"expirationDate should be year 2125 after +100y shift, got: {expiry!r}"
+    )
+
 
