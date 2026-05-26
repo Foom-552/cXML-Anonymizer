@@ -82,60 +82,70 @@ COUNTRY_PROFILES: dict[str, dict[str, str]] = {
         "display_name": "Australia (APAC)", "region": "APAC",
         "City": "Anonymized City", "State": "WA", "PostalCode": "6000",
         "Country": "Australia", "isoCountryCode": "AU",
+        "isoStateCode": "AU-WA",
         "Money": "1.00", "currency": "AUD", "Number": "0891234567",
     },
     "NZ": {
         "display_name": "New Zealand (APAC)", "region": "APAC",
         "City": "Anonymized City", "State": "Auckland", "PostalCode": "1010",
         "Country": "New Zealand", "isoCountryCode": "NZ",
+        "isoStateCode": "NZ-AUK",
         "Money": "1.00", "currency": "NZD", "Number": "093012345",
     },
     "IN": {
         "display_name": "India (APAC)", "region": "APAC",
         "City": "Anonymized City", "State": "Maharashtra", "PostalCode": "400001",
         "Country": "India", "isoCountryCode": "IN",
+        "isoStateCode": "IN-MH",
         "Money": "1.00", "currency": "INR", "Number": "02212345678",
     },
     "CN": {
         "display_name": "China (APAC)", "region": "APAC",
         "City": "Anonymized City", "State": "Shanghai", "PostalCode": "200000",
         "Country": "China", "isoCountryCode": "CN",
+        "isoStateCode": "CN-SH",
         "Money": "1.00", "currency": "CNY", "Number": "02112345678",
     },
     "SG": {
         "display_name": "Singapore (APAC)", "region": "APAC",
         "City": "Anonymized City", "State": "SG", "PostalCode": "018956",
         "Country": "Singapore", "isoCountryCode": "SG",
+        "isoStateCode": "SG-01",
         "Money": "1.00", "currency": "SGD", "Number": "61234567",
     },
     "KR": {
         "display_name": "South Korea (APAC)", "region": "APAC",
         "City": "Anonymized City", "State": "Seoul", "PostalCode": "04524",
         "Country": "Korea, Republic of", "isoCountryCode": "KR",
+        "isoStateCode": "KR-11",
         "Money": "1.00", "currency": "KRW", "Number": "0212345678",
     },
     "TH": {
         "display_name": "Thailand (APAC)", "region": "APAC",
         "City": "Anonymized City", "State": "Bangkok", "PostalCode": "10110",
         "Country": "Thailand", "isoCountryCode": "TH",
+        "isoStateCode": "TH-10",
         "Money": "1.00", "currency": "THB", "Number": "021234567",
     },
     "ID": {
         "display_name": "Indonesia (APAC)", "region": "APAC",
         "City": "Anonymized City", "State": "Jakarta", "PostalCode": "10110",
         "Country": "Indonesia", "isoCountryCode": "ID",
+        "isoStateCode": "ID-JK",
         "Money": "1.00", "currency": "IDR", "Number": "02112345678",
     },
     "PH": {
         "display_name": "Philippines (APAC)", "region": "APAC",
         "City": "Anonymized City", "State": "Metro Manila", "PostalCode": "1000",
         "Country": "Philippines", "isoCountryCode": "PH",
+        "isoStateCode": "PH-NCR",
         "Money": "1.00", "currency": "PHP", "Number": "0281234567",
     },
     "MY": {
         "display_name": "Malaysia (APAC)", "region": "APAC",
         "City": "Anonymized City", "State": "Kuala Lumpur", "PostalCode": "50450",
         "Country": "Malaysia", "isoCountryCode": "MY",
+        "isoStateCode": "MY-14",
         "Money": "1.00", "currency": "MYR", "Number": "0312345678",
     },
     # ── NAMAR (default: US) ─────────────────────────────────────────────
@@ -143,18 +153,21 @@ COUNTRY_PROFILES: dict[str, dict[str, str]] = {
         "display_name": "United States (NAMAR)", "region": "NAMAR",
         "City": "Anonymized City", "State": "CA", "PostalCode": "90210",
         "Country": "United States", "isoCountryCode": "US",
+        "isoStateCode": "US-CA",
         "Money": "1.00", "currency": "USD", "Number": "555-555-5555",
     },
     "CA": {
         "display_name": "Canada (NAMAR)", "region": "NAMAR",
         "City": "Anonymized City", "State": "ON", "PostalCode": "M5H 2N2",
         "Country": "Canada", "isoCountryCode": "CA",
+        "isoStateCode": "CA-ON",
         "Money": "1.00", "currency": "CAD", "Number": "416-555-5555",
     },
     "MX": {
         "display_name": "Mexico (NAMAR)", "region": "NAMAR",
         "City": "Anonymized City", "State": "CDMX", "PostalCode": "06600",
         "Country": "Mexico", "isoCountryCode": "MX",
+        "isoStateCode": "MX-CMX",
         "Money": "1.00", "currency": "MXN", "Number": "5512345678",
     },
     # ── EMEA (default: DE) ──────────────────────────────────────────────
@@ -162,66 +175,77 @@ COUNTRY_PROFILES: dict[str, dict[str, str]] = {
         "display_name": "Germany (EMEA)", "region": "EMEA",
         "City": "Anonymized City", "State": "BE", "PostalCode": "10115",
         "Country": "Germany", "isoCountryCode": "DE",
+        "isoStateCode": "DE-BE",
         "Money": "1.00", "currency": "EUR", "Number": "03012345678",
     },
     "GB": {
         "display_name": "United Kingdom (EMEA)", "region": "EMEA",
         "City": "Anonymized City", "State": "London", "PostalCode": "SW1A 1AA",
         "Country": "United Kingdom", "isoCountryCode": "GB",
+        "isoStateCode": "GB-ENG",
         "Money": "1.00", "currency": "GBP", "Number": "02012345678",
     },
     "FR": {
         "display_name": "France (EMEA)", "region": "EMEA",
         "City": "Anonymized City", "State": "IDF", "PostalCode": "75001",
         "Country": "France", "isoCountryCode": "FR",
+        "isoStateCode": "FR-IDF",
         "Money": "1.00", "currency": "EUR", "Number": "0112345678",
     },
     "NL": {
         "display_name": "Netherlands (EMEA)", "region": "EMEA",
         "City": "Anonymized City", "State": "NH", "PostalCode": "1012 AB",
         "Country": "Netherlands", "isoCountryCode": "NL",
+        "isoStateCode": "NL-NH",
         "Money": "1.00", "currency": "EUR", "Number": "0201234567",
     },
     "CH": {
         "display_name": "Switzerland (EMEA)", "region": "EMEA",
         "City": "Anonymized City", "State": "ZH", "PostalCode": "8001",
         "Country": "Switzerland", "isoCountryCode": "CH",
+        "isoStateCode": "CH-ZH",
         "Money": "1.00", "currency": "CHF", "Number": "0441234567",
     },
     "SE": {
         "display_name": "Sweden (EMEA)", "region": "EMEA",
         "City": "Anonymized City", "State": "Stockholm", "PostalCode": "111 22",
         "Country": "Sweden", "isoCountryCode": "SE",
+        "isoStateCode": "SE-AB",
         "Money": "1.00", "currency": "SEK", "Number": "081234567",
     },
     "AE": {
         "display_name": "UAE (EMEA)", "region": "EMEA",
         "City": "Anonymized City", "State": "Dubai", "PostalCode": "00000",
         "Country": "United Arab Emirates", "isoCountryCode": "AE",
+        "isoStateCode": "AE-DU",
         "Money": "1.00", "currency": "AED", "Number": "041234567",
     },
     "SA": {
         "display_name": "Saudi Arabia (EMEA)", "region": "EMEA",
         "City": "Anonymized City", "State": "Riyadh", "PostalCode": "11564",
         "Country": "Saudi Arabia", "isoCountryCode": "SA",
+        "isoStateCode": "SA-01",
         "Money": "1.00", "currency": "SAR", "Number": "0112345678",
     },
     "ZA": {
         "display_name": "South Africa (EMEA)", "region": "EMEA",
         "City": "Anonymized City", "State": "Gauteng", "PostalCode": "2000",
         "Country": "South Africa", "isoCountryCode": "ZA",
+        "isoStateCode": "ZA-GP",
         "Money": "1.00", "currency": "ZAR", "Number": "0111234567",
     },
     "IL": {
         "display_name": "Israel (EMEA)", "region": "EMEA",
         "City": "Anonymized City", "State": "Tel Aviv", "PostalCode": "6100000",
         "Country": "Israel", "isoCountryCode": "IL",
+        "isoStateCode": "IL-TA",
         "Money": "1.00", "currency": "ILS", "Number": "031234567",
     },
     "TR": {
         "display_name": "Turkey (EMEA)", "region": "EMEA",
         "City": "Anonymized City", "State": "Istanbul", "PostalCode": "34000",
         "Country": "Turkey", "isoCountryCode": "TR",
+        "isoStateCode": "TR-34",
         "Money": "1.00", "currency": "TRY", "Number": "02121234567",
     },
     # ── Japan (default: JP) ─────────────────────────────────────────────
@@ -229,6 +253,7 @@ COUNTRY_PROFILES: dict[str, dict[str, str]] = {
         "display_name": "Japan", "region": "Japan",
         "City": "Chiyoda", "State": "Tokyo", "PostalCode": "100-0001",
         "Country": "Japan", "isoCountryCode": "JP",
+        "isoStateCode": "JP-13",
         "Money": "1.00", "currency": "JPY", "Number": "0312345678",
     },
     # ── LATAM (default: BR) ─────────────────────────────────────────────
@@ -236,24 +261,28 @@ COUNTRY_PROFILES: dict[str, dict[str, str]] = {
         "display_name": "Brazil (LATAM)", "region": "LATAM",
         "City": "Anonymized City", "State": "SP", "PostalCode": "01000-000",
         "Country": "Brazil", "isoCountryCode": "BR",
+        "isoStateCode": "BR-SP",
         "Money": "1.00", "currency": "BRL", "Number": "1112345678",
     },
     "AR": {
         "display_name": "Argentina (LATAM)", "region": "LATAM",
         "City": "Anonymized City", "State": "BA", "PostalCode": "C1001",
         "Country": "Argentina", "isoCountryCode": "AR",
+        "isoStateCode": "AR-B",
         "Money": "1.00", "currency": "ARS", "Number": "1112345678",
     },
     "CO": {
         "display_name": "Colombia (LATAM)", "region": "LATAM",
         "City": "Anonymized City", "State": "Bogota", "PostalCode": "110111",
         "Country": "Colombia", "isoCountryCode": "CO",
+        "isoStateCode": "CO-DC",
         "Money": "1.00", "currency": "COP", "Number": "6011234567",
     },
     "CL": {
         "display_name": "Chile (LATAM)", "region": "LATAM",
         "City": "Anonymized City", "State": "RM", "PostalCode": "8320000",
         "Country": "Chile", "isoCountryCode": "CL",
+        "isoStateCode": "CL-RM",
         "Money": "1.00", "currency": "CLP", "Number": "221234567",
     },
 }
@@ -1373,6 +1402,17 @@ def anonymize_elements(
                     "anonymized": profile["isoCountryCode"],
                 })
 
+        # Special-case: State isoStateCode attribute
+        if local_tag == "State" and "isoStateCode" in profile:
+            old_sc = child.get("isoStateCode", "")
+            child.set("isoStateCode", profile["isoStateCode"])
+            if old_sc != profile["isoStateCode"]:
+                log.append({
+                    "field": "<State isoStateCode>",
+                    "original": old_sc,
+                    "anonymized": profile["isoStateCode"],
+                })
+
         # Extrinsic handling
         if local_tag == "Extrinsic":
             extrinsic_name = child.get("name", "")
@@ -1471,6 +1511,11 @@ def anonymize_elements(
             local_attr = lxml_ET.QName(attr_name).localname
             # Never overwrite the Extrinsic name= attribute
             if local_tag == "Extrinsic" and local_attr == "name":
+                continue
+            # Skip special-cased attributes handled above with old != new guards
+            if local_tag == "Country" and local_attr == "isoCountryCode":
+                continue
+            if local_tag == "State" and local_attr == "isoStateCode":
                 continue
             if local_attr in profile:
                 old_val = child.get(attr_name, "")
