@@ -410,6 +410,15 @@ COUNTRY_NAME_TO_COUNTRY: dict[str, tuple[str, str]] = {
 
 SENSITIVE_ATTR_NAMES: set[str] = {"name", "email", "phone", "contact", "firstName", "lastName"}
 
+# Subtrees belonging to the buyer — the entire subtree is skipped during anonymization.
+_BUYER_SUBTREE_TAGS: frozenset[str] = frozenset({"ShipTo", "BillTo"})
+
+# Financial elements whose text and attributes must never be replaced.
+_FINANCIAL_PRESERVE_TAGS: frozenset[str] = frozenset({"Money"})
+
+# Parent element names in which <Description> text is tax-related and must be preserved.
+_TAX_PARENT_TAGS: frozenset[str] = frozenset({"TaxDetail", "TaxHeader"})
+
 PRESERVE_EXTRINSIC_NAMES: set[str] = {
     "extLineNumber",
     "materialStorageLocation",
@@ -1334,6 +1343,7 @@ def anonymize_elements(
     element: lxml_ET._Element,
     profile: dict[str, str],
     value_map: dict | None = None,
+    _parent_tag: str = "",
 ) -> list[dict]:
     """Recursively traverse *element* and apply anonymization rules from *profile*.
 
@@ -1349,7 +1359,21 @@ def anonymize_elements(
     for child in element:
         local_tag = lxml_ET.QName(child.tag).localname
 
+        # Buyer subtrees — skip entirely; all data preserved as-is.
+        if local_tag in _BUYER_SUBTREE_TAGS:
+            continue
+
         # --- Element text substitution ---
+        # Financial elements — text and all attributes preserved; skip all profile substitution.
+        if local_tag in _FINANCIAL_PRESERVE_TAGS:
+            log.extend(anonymize_elements(child, profile, value_map, local_tag))
+            continue
+
+        # Tax Description preserved — skip profile substitution for tax context.
+        if local_tag == "Description" and _parent_tag in _TAX_PARENT_TAGS:
+            log.extend(anonymize_elements(child, profile, value_map, local_tag))
+            continue
+
         if local_tag in profile:
             old = (child.text or "").strip()
             if old and local_tag in _DISTINCT_PROFILE_TAGS and value_map is not None:
@@ -1380,16 +1404,7 @@ def anonymize_elements(
                         "anonymized": profile[local_tag],
                     })
 
-        # Special-case: Money currency attribute
-        if local_tag == "Money" and "currency" in profile:
-            old_curr = child.get("currency", "")
-            child.set("currency", profile["currency"])
-            if old_curr != profile["currency"]:
-                log.append({
-                    "field": "<Money currency>",
-                    "original": old_curr,
-                    "anonymized": profile["currency"],
-                })
+        # Financial values and currency preserved — original document data kept intact.
 
         # Special-case: Country isoCountryCode attribute
         if local_tag == "Country" and "isoCountryCode" in profile:
@@ -1505,7 +1520,7 @@ def anonymize_elements(
         # --- Attribute substitution ---
         # Skip OrderRequestHeader — its attributes are fully managed by apply_header_template
         if local_tag == "OrderRequestHeader":
-            log.extend(anonymize_elements(child, profile, value_map))
+            log.extend(anonymize_elements(child, profile, value_map, local_tag))
             continue
         for attr_name in list(child.attrib):
             local_attr = lxml_ET.QName(attr_name).localname
@@ -1534,7 +1549,7 @@ def anonymize_elements(
                     "anonymized": "ANONYMIZED",
                 })
 
-        log.extend(anonymize_elements(child, profile, value_map))
+        log.extend(anonymize_elements(child, profile, value_map, local_tag))
 
     return log
 

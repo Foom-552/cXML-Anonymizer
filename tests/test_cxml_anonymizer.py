@@ -64,6 +64,16 @@ MINIMAL_CXML = """\
             </PostalAddress>
           </Address>
         </ShipTo>
+        <ShipFrom>
+          <Address>
+            <Name xml:lang="en">Supplier Corp</Name>
+            <PostalAddress>
+              <Street>123 Supplier St</Street>
+              <City>Melbourne</City>
+              <Country isoCountryCode="AU">Australia</Country>
+            </PostalAddress>
+          </Address>
+        </ShipFrom>
       </OrderRequestHeader>
     </OrderRequest>
   </Request>
@@ -314,20 +324,24 @@ def test_anonymize_elements_replaces_street():
     profile.pop("display_name", None)
     profile.pop("region", None)
     log = anonymize_elements(root, profile)
-    street_el = root.find(".//Street")
+    # ShipFrom is supplier-side — its Street must be anonymized.
+    ship_from = root.find(".//ShipFrom")
+    assert ship_from is not None
+    street_el = ship_from.find(".//Street")
     assert street_el is not None
-    assert street_el.text != "123 Real St"
+    assert street_el.text != "123 Supplier St"
     assert any("Street" in e["field"] for e in log)
 
 
-def test_anonymize_elements_replaces_money_currency():
+def test_anonymize_elements_preserves_money_currency():
+    """<Money currency> must not be replaced — financial values are preserved."""
     root = _parse(MINIMAL_CXML)
     from cxml_anonymizer import _resolve_profile
     profile = _resolve_profile("AU", "APAC")
     anonymize_elements(root, profile)
     money_el = root.find(".//Money")
     assert money_el is not None
-    assert money_el.get("currency") == profile.get("currency", "AUD")
+    assert money_el.get("currency") == "AUD"  # original value preserved, not replaced
 
 
 # ---------------------------------------------------------------------------
@@ -341,8 +355,12 @@ def test_process_cxml_content_produces_valid_xml():
 
 
 def test_process_cxml_content_removes_real_street():
+    """Supplier-side <ShipFrom><Street> must be anonymized; buyer <ShipTo><Street> preserved."""
     result_xml, _log, *_ = process_cxml_content(MINIMAL_CXML, country_code="AU", region_code="APAC", detection_method="test")
-    assert "123 Real St" not in result_xml
+    # Supplier street (ShipFrom) must be anonymized
+    assert "123 Supplier St" not in result_xml
+    # Buyer street (ShipTo) must be preserved
+    assert "123 Real St" in result_xml
 
 
 def test_process_cxml_content_removes_buyer_identity():
@@ -628,7 +646,11 @@ def test_substitution_log_has_category_column():
 def _two_contact_cxml(number1: str, number2: str, name1: str = "Acme Corp",
                       name2: str = "Different Corp", email1: str = "",
                       email2: str = "") -> str:
-    """Minimal cXML with ShipTo and BillTo contacts carrying the given values."""
+    """Minimal cXML with two supplier-side contacts (ShipFrom/RemitTo) carrying the given values.
+
+    Uses supplier-side elements so anonymization fires — buyer subtrees (ShipTo/BillTo)
+    are now preserved and would make these distinct-value tests meaningless.
+    """
     email_block1 = f"<Email>{email1}</Email>" if email1 else ""
     email_block2 = f"<Email>{email2}</Email>" if email2 else ""
     return f"""\
@@ -645,6 +667,13 @@ def _two_contact_cxml(number1: str, number2: str, name1: str = "Acme Corp",
         <Total><Money currency="AUD">100.00</Money></Total>
         <ShipTo>
           <Address>
+            <PostalAddress>
+              <Country isoCountryCode="AU">Australia</Country>
+            </PostalAddress>
+          </Address>
+        </ShipTo>
+        <ShipFrom>
+          <Address>
             <Name xml:lang="en">{name1}</Name>
             <PostalAddress>
               <Country isoCountryCode="AU">Australia</Country>
@@ -658,8 +687,8 @@ def _two_contact_cxml(number1: str, number2: str, name1: str = "Acme Corp",
               </TelephoneNumber>
             </Phone>
           </Address>
-        </ShipTo>
-        <BillTo>
+        </ShipFrom>
+        <RemitTo>
           <Address>
             <Name xml:lang="en">{name2}</Name>
             <PostalAddress>
@@ -674,7 +703,7 @@ def _two_contact_cxml(number1: str, number2: str, name1: str = "Acme Corp",
               </TelephoneNumber>
             </Phone>
           </Address>
-        </BillTo>
+        </RemitTo>
       </OrderRequestHeader>
     </OrderRequest>
   </Request>
@@ -894,3 +923,262 @@ def test_blanket_expiration_date_shifted_100y():
     )
 
 
+# ---------------------------------------------------------------------------
+# Buyer preservation & financial passthrough tests
+# ---------------------------------------------------------------------------
+
+_BUYER_PRESERVATION_CXML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<cXML payloadID="buyer-test-001@buyer.example.com" timestamp="2024-01-01T00:00:00Z" version="1.2.014">
+  <Header>
+    <From><Credential domain="NetworkId"><Identity>buyer-id</Identity></Credential></From>
+    <To><Credential domain="NetworkId"><Identity>supplier-id</Identity></Credential></To>
+    <Sender><Credential domain="NetworkID"><Identity>provider-id</Identity></Credential></Sender>
+  </Header>
+  <Request deploymentMode="production">
+    <OrderRequest>
+      <OrderRequestHeader orderID="PO-9999" orderDate="2024-06-01" type="new">
+        <Total><Money currency="USD">1250.00</Money></Total>
+        <ShipTo>
+          <Address>
+            <Name xml:lang="en">Real Buyer Corp</Name>
+            <PostalAddress>
+              <Street>Real Buyer St</Street>
+              <City>BuyerCity</City>
+              <State isoStateCode="US-PA">PA</State>
+              <PostalCode>15212</PostalCode>
+              <Country isoCountryCode="US">United States</Country>
+            </PostalAddress>
+            <Email>buyer@company.com</Email>
+          </Address>
+        </ShipTo>
+        <ShipFrom>
+          <Address>
+            <Name xml:lang="en">Real Supplier Corp</Name>
+            <PostalAddress>
+              <Street>Real Supplier St</Street>
+              <City>SupplierCity</City>
+              <Country isoCountryCode="US">United States</Country>
+            </PostalAddress>
+          </Address>
+        </ShipFrom>
+      </OrderRequestHeader>
+    </OrderRequest>
+  </Request>
+</cXML>"""
+
+_BILL_TO_CXML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<cXML payloadID="billto-test-001@buyer.example.com" timestamp="2024-01-01T00:00:00Z" version="1.2.014">
+  <Header>
+    <From><Credential domain="NetworkId"><Identity>supplier-id</Identity></Credential></From>
+    <To><Credential domain="NetworkId"><Identity>buyer-id</Identity></Credential></To>
+    <Sender><Credential domain="NetworkID"><Identity>provider-id</Identity></Credential></Sender>
+  </Header>
+  <Request deploymentMode="production">
+    <InvoiceDetailRequest>
+      <InvoiceDetailRequestHeader invoiceID="INV-001" purpose="standard" operation="new" invoiceDate="2024-06-01">
+        <InvoiceDetailHeaderIndicator/>
+        <InvoiceDetailShipping>
+          <Contact role="billTo">
+            <Name xml:lang="en">Real Buyer Corp</Name>
+          </Contact>
+        </InvoiceDetailShipping>
+        <BillTo>
+          <Address>
+            <Name xml:lang="en">Real Buyer Corp</Name>
+            <PostalAddress>
+              <Street>456 Buyer Billing Rd</Street>
+              <City>BillingCity</City>
+              <Country isoCountryCode="US">United States</Country>
+            </PostalAddress>
+          </Address>
+        </BillTo>
+      </InvoiceDetailRequestHeader>
+    </InvoiceDetailRequest>
+  </Request>
+</cXML>"""
+
+_MONEY_CURRENCY_CXML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<cXML payloadID="money-test-001@buyer.example.com" timestamp="2024-01-01T00:00:00Z" version="1.2.014">
+  <Header>
+    <From><Credential domain="NetworkId"><Identity>buyer-id</Identity></Credential></From>
+    <To><Credential domain="NetworkId"><Identity>supplier-id</Identity></Credential></To>
+    <Sender><Credential domain="NetworkID"><Identity>provider-id</Identity></Credential></Sender>
+  </Header>
+  <Request deploymentMode="production">
+    <OrderRequest>
+      <OrderRequestHeader orderID="PO-MONEY-001" orderDate="2024-06-01" type="new">
+        <Total><Money currency="USD">1250.00</Money></Total>
+        <ShipTo>
+          <Address>
+            <PostalAddress>
+              <Country isoCountryCode="US">United States</Country>
+            </PostalAddress>
+          </Address>
+        </ShipTo>
+      </OrderRequestHeader>
+    </OrderRequest>
+  </Request>
+</cXML>"""
+
+_TAX_DESCRIPTION_CXML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<cXML payloadID="tax-test-001@buyer.example.com" timestamp="2024-01-01T00:00:00Z" version="1.2.014">
+  <Header>
+    <From><Credential domain="NetworkId"><Identity>buyer-id</Identity></Credential></From>
+    <To><Credential domain="NetworkId"><Identity>supplier-id</Identity></Credential></To>
+    <Sender><Credential domain="NetworkID"><Identity>provider-id</Identity></Credential></Sender>
+  </Header>
+  <Request deploymentMode="production">
+    <OrderRequest>
+      <OrderRequestHeader orderID="PO-TAX-001" orderDate="2024-06-01" type="new">
+        <Total><Money currency="USD">110.00</Money></Total>
+        <Tax>
+          <TaxDetail purpose="tax" category="vat" percentageRate="10">
+            <TaxableAmount><Money currency="USD">100.00</Money></TaxableAmount>
+            <TaxAmount><Money currency="USD">10.00</Money></TaxAmount>
+            <Description xml:lang="en">GST 10%</Description>
+          </TaxDetail>
+        </Tax>
+        <ShipTo>
+          <Address>
+            <PostalAddress>
+              <Country isoCountryCode="US">United States</Country>
+            </PostalAddress>
+          </Address>
+        </ShipTo>
+      </OrderRequestHeader>
+      <ItemOut quantity="100" lineNumber="1">
+        <ItemID><SupplierPartID>PART-001</SupplierPartID></ItemID>
+        <ItemDetail>
+          <UnitPrice><Money currency="USD">1.00</Money></UnitPrice>
+          <Description xml:lang="en">Argos Water Filter</Description>
+          <UnitOfMeasure>EA</UnitOfMeasure>
+        </ItemDetail>
+      </ItemOut>
+    </OrderRequest>
+  </Request>
+</cXML>"""
+
+
+def test_shipto_address_preserved():
+    """<ShipTo> subtree must be left completely untouched — buyer data."""
+    result_xml, _log, *_ = process_cxml_content(
+        _BUYER_PRESERVATION_CXML, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    root = lxml_ET.fromstring(result_xml.encode())
+    ship_to = root.find(".//{*}ShipTo")
+    assert ship_to is not None, "<ShipTo> element not found in output"
+    street = ship_to.find(".//{*}Street")
+    assert street is not None and street.text == "Real Buyer St", (
+        f"<ShipTo><Street> should be 'Real Buyer St', got: {street.text!r}"
+    )
+    name = ship_to.find(".//{*}Name")
+    assert name is not None and name.text == "Real Buyer Corp", (
+        f"<ShipTo><Name> should be 'Real Buyer Corp', got: {name.text!r}"
+    )
+
+
+def test_shipto_email_preserved():
+    """<Email> nested inside <ShipTo> must not be anonymized."""
+    result_xml, _log, *_ = process_cxml_content(
+        _BUYER_PRESERVATION_CXML, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    root = lxml_ET.fromstring(result_xml.encode())
+    ship_to = root.find(".//{*}ShipTo")
+    assert ship_to is not None
+    email = ship_to.find(".//{*}Email")
+    assert email is not None and email.text == "buyer@company.com", (
+        f"<ShipTo><Email> should be 'buyer@company.com', got: {email.text!r}"
+    )
+
+
+def test_billto_address_preserved():
+    """<BillTo> subtree must be left completely untouched — buyer data."""
+    result_xml, _log, *_ = process_cxml_content(
+        _BILL_TO_CXML, country_code="US", region_code="NAMAR", detection_method="test"
+    )
+    root = lxml_ET.fromstring(result_xml.encode())
+    bill_to = root.find(".//{*}BillTo")
+    assert bill_to is not None, "<BillTo> element not found in output"
+    street = bill_to.find(".//{*}Street")
+    assert street is not None and street.text == "456 Buyer Billing Rd", (
+        f"<BillTo><Street> should be '456 Buyer Billing Rd', got: {street.text!r}"
+    )
+    name = bill_to.find(".//{*}Name")
+    assert name is not None and name.text == "Real Buyer Corp", (
+        f"<BillTo><Name> should be 'Real Buyer Corp', got: {name.text!r}"
+    )
+
+
+def test_shipfrom_still_anonymized():
+    """<ShipFrom> (supplier address) must still be anonymized."""
+    result_xml, _log, *_ = process_cxml_content(
+        _BUYER_PRESERVATION_CXML, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    root = lxml_ET.fromstring(result_xml.encode())
+    ship_from = root.find(".//{*}ShipFrom")
+    assert ship_from is not None, "<ShipFrom> element not found in output"
+    street = ship_from.find(".//{*}Street")
+    assert street is not None and street.text != "Real Supplier St", (
+        "<ShipFrom><Street> should have been anonymized, but original value was preserved"
+    )
+
+
+def test_money_amount_preserved():
+    """<Money> text (numeric amount) must be preserved as-is."""
+    result_xml, _log, *_ = process_cxml_content(
+        _MONEY_CURRENCY_CXML, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    root = lxml_ET.fromstring(result_xml.encode())
+    money = root.find(".//{*}Money")
+    assert money is not None, "<Money> element not found in output"
+    assert money.text == "1250.00", (
+        f"<Money> amount should be '1250.00', got: {money.text!r}"
+    )
+
+
+def test_money_currency_preserved():
+    """<Money currency> attribute must not be replaced with profile currency."""
+    result_xml, _log, *_ = process_cxml_content(
+        _MONEY_CURRENCY_CXML, country_code="AU", region_code="APAC", detection_method="test"
+    )
+    root = lxml_ET.fromstring(result_xml.encode())
+    money = root.find(".//{*}Money")
+    assert money is not None, "<Money> element not found in output"
+    assert money.get("currency") == "USD", (
+        f"<Money currency> should stay 'USD' (not replaced with AUD), got: {money.get('currency')!r}"
+    )
+
+
+def test_taxdetail_description_preserved():
+    """<Description> inside <TaxDetail> must preserve original tax description text."""
+    result_xml, _log, *_ = process_cxml_content(
+        _TAX_DESCRIPTION_CXML, country_code="US", region_code="NAMAR", detection_method="test"
+    )
+    root = lxml_ET.fromstring(result_xml.encode())
+    tax_detail = root.find(".//{*}TaxDetail")
+    assert tax_detail is not None, "<TaxDetail> element not found in output"
+    desc = tax_detail.find("{*}Description")
+    assert desc is not None and desc.text == "GST 10%", (
+        f"<TaxDetail><Description> should be 'GST 10%', got: {desc.text!r}"
+    )
+
+
+def test_itemdetail_description_still_anonymized():
+    """<Description> inside <ItemDetail> (supplier product) must still be anonymized."""
+    result_xml, _log, *_ = process_cxml_content(
+        _TAX_DESCRIPTION_CXML, country_code="US", region_code="NAMAR", detection_method="test"
+    )
+    root = lxml_ET.fromstring(result_xml.encode())
+    item_detail = root.find(".//{*}ItemDetail")
+    assert item_detail is not None, "<ItemDetail> element not found in output"
+    desc = item_detail.find("{*}Description")
+    assert desc is not None and desc.text != "Argos Water Filter", (
+        "<ItemDetail><Description> should have been anonymized, but original supplier value was preserved"
+    )
+    assert desc.text == "Anonymized Item Description", (
+        f"<ItemDetail><Description> should be 'Anonymized Item Description', got: {desc.text!r}"
+    )
